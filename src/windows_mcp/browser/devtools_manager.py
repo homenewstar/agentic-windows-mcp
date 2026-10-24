@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -18,12 +20,51 @@ from playwright.async_api import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CDP_URL = "http://localhost:9222"
 MAX_BUFFER_SIZE = 500
 
 
+def resolve_user_browser_endpoint() -> Optional[str]:
+    """Auto-detect the WebSocket CDP endpoint from the user's currently running browser (Chrome, Edge, Brave)."""
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\DevToolsActivePort"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\DevToolsActivePort"),
+        os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\DevToolsActivePort"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome SxS\User Data\DevToolsActivePort"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    port = f.readline().strip()
+                    ws_path = f.readline().strip()
+                if port and ws_path:
+                    endpoint = f"ws://127.0.0.1:{port}{ws_path}"
+                    logger.info("Found active browser DevTools endpoint from %s: %s", path, endpoint)
+                    return endpoint
+            except Exception as e:
+                logger.debug("Failed reading %s: %s", path, e)
+
+    # Fallback to standard debugging port
+    return "http://127.0.0.1:9222"
+
+
+def find_system_browser_executable() -> Optional[str]:
+    """Find the user's primary installed browser executable (Chrome or Edge)."""
+    candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 class BrowserDevToolsManager:
-    """Manages Playwright lifecycle on an isolated Proactor thread on Windows."""
+    """Manages direct CDP connection to the user's currently active desktop browser on an isolated Proactor thread."""
 
     _instance: Optional[BrowserDevToolsManager] = None
 
@@ -33,15 +74,15 @@ class BrowserDevToolsManager:
         self.context: Optional[BrowserContext] = None
         self.pages: List[Page] = []
         self.active_page_index: int = 0
-        self.is_connected_cdp: bool = False
-        self.cdp_url: Optional[str] = None
+        self.connected_endpoint: Optional[str] = None
 
         # Diagnostic ring buffers
         self.console_logs: List[Dict[str, Any]] = []
         self.network_requests: List[Dict[str, Any]] = []
         self.network_details: Dict[str, Dict[str, Any]] = {}
+        self._monitored_page_ids: set[int] = set()
 
-        # Dedicated worker loop running ProactorEventLoop (required for Windows subprocesses)
+        # Dedicated worker loop running ProactorEventLoop (required for Windows subprocesses / websockets)
         self._worker_loop: Optional[asyncio.AbstractEventLoop] = None
         self._worker_thread: Optional[threading.Thread] = None
         self._ready_event = threading.Event()
@@ -55,7 +96,7 @@ class BrowserDevToolsManager:
             self._ready_event.set()
             loop.run_forever()
 
-        self._worker_thread = threading.Thread(target=runner, daemon=True, name="PlaywrightProactorThread")
+        self._worker_thread = threading.Thread(target=runner, daemon=True, name="PlaywrightUserBrowserThread")
         self._worker_thread.start()
         self._ready_event.wait()
 
@@ -69,12 +110,16 @@ class BrowserDevToolsManager:
             cls._instance = BrowserDevToolsManager()
         return cls._instance
 
-    # Internal worker methods (executed inside Proactor loop)
     async def _init_playwright(self) -> None:
         if self.playwright is None:
             self.playwright = await async_playwright().start()
 
     def _attach_page_listeners(self, page: Page) -> None:
+        pid = id(page)
+        if pid in self._monitored_page_ids:
+            return
+        self._monitored_page_ids.add(pid)
+
         def handle_console(msg: Any) -> None:
             entry = {
                 "timestamp": time.time(),
@@ -134,99 +179,116 @@ class BrowserDevToolsManager:
         page.on("request", handle_request)
         page.on("response", handle_response)
 
-    async def _connect_or_launch_internal(
-        self,
-        cdp_url: str = DEFAULT_CDP_URL,
-        headless: bool = False,
-        browser_type: str = "chromium",
-    ) -> Dict[str, Any]:
+    async def _connect_to_user_browser_internal(self, custom_endpoint: Optional[str] = None) -> Dict[str, Any]:
+        """Connect directly to the user's running browser via DevTools CDP WebSocket."""
         await self._init_playwright()
 
-        if self.browser and self.browser.is_connected():
+        if self.browser and self.browser.is_connected() and self.context:
+            await self._refresh_pages()
             return {
                 "status": "connected",
-                "mode": "cdp" if self.is_connected_cdp else "standalone",
-                "active_pages": len(self.pages),
-                "cdp_url": self.cdp_url,
+                "mode": "user_active_browser",
+                "endpoint": self.connected_endpoint,
+                "open_tabs_count": len(self.pages),
+                "active_tab": await self._get_active_tab_summary(),
             }
 
-        # 1. Attempt CDP
-        if cdp_url:
-            try:
-                self.browser = await asyncio.wait_for(
-                    self.playwright.chromium.connect_over_cdp(cdp_url),
-                    timeout=2.0,
-                )
-                self.is_connected_cdp = True
-                self.cdp_url = cdp_url
-                contexts = self.browser.contexts
-                if contexts:
-                    self.context = contexts[0]
-                    self.pages = list(self.context.pages)
-                else:
-                    self.context = await self.browser.new_context()
-                    self.pages = []
+        endpoint = custom_endpoint or resolve_user_browser_endpoint()
+        if not endpoint:
+            raise RuntimeError("No user browser DevTools endpoint found.")
 
-                for page in self.pages:
-                    self._attach_page_listeners(page)
+        logger.info("Connecting to user browser at %s", endpoint)
+        try:
+            self.browser = await asyncio.wait_for(
+                self.playwright.chromium.connect_over_cdp(endpoint),
+                timeout=4.0,
+            )
+            self.connected_endpoint = endpoint
+        except Exception as e:
+            # If connection failed, check if user's Chrome can be launched with remote debugging
+            browser_exe = find_system_browser_executable()
+            if browser_exe:
+                logger.info("Attempting to launch user browser %s with remote-debugging-port=9222", browser_exe)
+                subprocess.Popen([browser_exe, "--remote-debugging-port=9222", "--restore-last-session"])
+                await asyncio.sleep(1.5)
+                new_endpoint = resolve_user_browser_endpoint()
+                self.browser = await self.playwright.chromium.connect_over_cdp(new_endpoint)
+                self.connected_endpoint = new_endpoint
+            else:
+                raise RuntimeError(
+                    f"Could not connect to user's running browser ({e}). "
+                    f"Please launch your browser with remote debugging enabled: chrome.exe --remote-debugging-port=9222"
+                ) from e
 
-                if not self.pages:
-                    new_page = await self.context.new_page()
-                    self._attach_page_listeners(new_page)
-                    self.pages.append(new_page)
+        contexts = self.browser.contexts
+        if contexts:
+            self.context = contexts[0]
+        else:
+            raise RuntimeError("Connected to user browser but no active browser context was found.")
 
-                self.active_page_index = 0
-                return {
-                    "status": "connected",
-                    "mode": "cdp",
-                    "cdp_url": cdp_url,
-                    "open_pages_count": len(self.pages),
-                }
-            except Exception as e:
-                logger.info("CDP attach to %s skipped (%s). Fallback to standalone launch.", cdp_url, e)
-
-        # 2. Standalone launch
-        self.is_connected_cdp = False
-        self.cdp_url = None
-        launcher = getattr(self.playwright, browser_type, self.playwright.chromium)
-        self.browser = await launcher.launch(headless=headless)
-        self.context = await self.browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        )
-        page = await self.context.new_page()
-        self._attach_page_listeners(page)
-        self.pages = [page]
-        self.active_page_index = 0
-
+        await self._refresh_pages()
         return {
             "status": "connected",
-            "mode": "standalone",
-            "browser_type": browser_type,
-            "headless": headless,
-            "open_pages_count": 1,
+            "mode": "user_active_browser",
+            "endpoint": self.connected_endpoint,
+            "open_tabs_count": len(self.pages),
+            "active_tab": await self._get_active_tab_summary(),
         }
+
+    async def _refresh_pages(self) -> None:
+        """Syncs open pages directly with the user's active browser tabs."""
+        if not self.context:
+            return
+        current_pages = [p for p in self.context.pages if not p.is_closed()]
+        self.pages = current_pages
+
+        for p in self.pages:
+            self._attach_page_listeners(p)
+
+        # Detect which tab the user is actively viewing on screen (document.visibilityState == 'visible')
+        visible_idx = None
+        for i, p in enumerate(self.pages):
+            try:
+                vis = await p.evaluate("document.visibilityState")
+                if vis == "visible":
+                    visible_idx = i
+                    break
+            except Exception:
+                pass
+
+        if visible_idx is not None:
+            self.active_page_index = visible_idx
+        elif self.active_page_index >= len(self.pages):
+            self.active_page_index = max(0, len(self.pages) - 1)
+
+    async def _get_active_tab_summary(self) -> Dict[str, Any]:
+        if not self.pages or self.active_page_index >= len(self.pages):
+            return {"title": "None", "url": "None"}
+        p = self.pages[self.active_page_index]
+        try:
+            return {
+                "page_id": self.active_page_index,
+                "title": await p.title(),
+                "url": p.url,
+            }
+        except Exception:
+            return {"page_id": self.active_page_index, "url": getattr(p, "url", "unknown")}
 
     async def _get_active_page_internal(self) -> Page:
         if not self.browser or not self.browser.is_connected() or not self.pages:
-            await self._connect_or_launch_internal()
+            await self._connect_to_user_browser_internal()
 
-        self.pages = [p for p in self.pages if not p.is_closed()]
+        await self._refresh_pages()
         if not self.pages:
-            if not self.context:
-                self.context = await self.browser.new_context()
+            # If user has no tabs open, open one in the user's browser
             page = await self.context.new_page()
             self._attach_page_listeners(page)
             self.pages = [page]
             self.active_page_index = 0
 
-        if self.active_page_index >= len(self.pages):
-            self.active_page_index = len(self.pages) - 1
-
         return self.pages[self.active_page_index]
 
     async def _safe_evaluate(self, page: Page, script: str, arg: Any = None) -> Any:
-        """Evaluates script with retry if execution context was destroyed by in-flight navigation."""
         try:
             if arg is not None:
                 return await page.evaluate(script, arg)
@@ -247,6 +309,7 @@ class BrowserDevToolsManager:
             "url": page.url,
             "title": await page.title(),
             "status": res.status if res else 200,
+            "target": "user_active_browser_tab",
         }
 
     async def _get_page_snapshot_internal(self, selector: Optional[str], format_type: str, max_length: int) -> Dict[str, Any]:
@@ -262,7 +325,7 @@ class BrowserDevToolsManager:
         if format_type == "text":
             soup = BeautifulSoup(raw_html, "html.parser")
             text = soup.get_text(separator="\n", strip=True)
-            return {"url": page.url, "format": "text", "content": text[:max_length]}
+            return {"url": page.url, "title": await page.title(), "format": "text", "content": text[:max_length]}
 
         soup = BeautifulSoup(raw_html, "html.parser")
         for tag in soup(["script", "style", "noscript"]):
@@ -372,7 +435,7 @@ class BrowserDevToolsManager:
     async def _click_internal(self, selector: str, button: str, click_count: int) -> Dict[str, Any]:
         page = await self._get_active_page_internal()
         await page.click(selector, button=button, click_count=click_count)
-        return {"action": "click", "selector": selector, "status": "success"}
+        return {"action": "click", "selector": selector, "status": "success", "target": "user_active_browser_tab"}
 
     async def _fill_internal(self, selector: str, value: str) -> Dict[str, Any]:
         page = await self._get_active_page_internal()
@@ -419,23 +482,29 @@ class BrowserDevToolsManager:
         }
 
     async def _list_pages_internal(self) -> List[Dict[str, Any]]:
+        await self._refresh_pages()
         page_info = []
         for i, p in enumerate(self.pages):
             if not p.is_closed():
+                try:
+                    title = await p.title()
+                except Exception:
+                    title = "Unknown"
                 page_info.append({
                     "page_id": i,
-                    "title": await p.title() if not p.is_closed() else "Closed",
+                    "title": title,
                     "url": p.url,
                     "is_active": (i == self.active_page_index),
                 })
         return page_info
 
     async def _select_page_internal(self, page_id: int) -> Dict[str, Any]:
+        await self._refresh_pages()
         if 0 <= page_id < len(self.pages) and not self.pages[page_id].is_closed():
             self.active_page_index = page_id
             page = self.pages[page_id]
             await page.bring_to_front()
-            return {"page_id": page_id, "url": page.url, "title": await page.title()}
+            return {"page_id": page_id, "url": page.url, "title": await page.title(), "status": "selected"}
         raise ValueError(f"Invalid or closed page_id: {page_id}")
 
     async def _new_page_internal(self, url: str) -> Dict[str, Any]:
@@ -446,9 +515,10 @@ class BrowserDevToolsManager:
         self.active_page_index = len(self.pages) - 1
         if url and url != "about:blank":
             await page.goto(url, wait_until="domcontentloaded")
-        return {"page_id": self.active_page_index, "url": page.url, "title": await page.title()}
+        return {"page_id": self.active_page_index, "url": page.url, "title": await page.title(), "status": "created_in_user_browser"}
 
     async def _close_page_internal(self, page_id: Optional[int]) -> Dict[str, Any]:
+        await self._refresh_pages()
         target_idx = self.active_page_index if page_id is None else page_id
         if 0 <= target_idx < len(self.pages):
             page = self.pages[target_idx]
@@ -460,18 +530,17 @@ class BrowserDevToolsManager:
         raise ValueError(f"Invalid page_id: {target_idx}")
 
     async def _close_internal(self) -> None:
-        if self.browser:
-            await self.browser.close()
-            self.browser = None
-            self.context = None
-            self.pages.clear()
+        # Disconnect CDP cleanly without terminating user's desktop browser
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
+            self.browser = None
+            self.context = None
+            self.pages.clear()
 
-    # Public asynchronous API (safely bridges whatever caller event loop to the Proactor worker)
-    async def connect_or_launch(self, cdp_url: str = DEFAULT_CDP_URL, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
-        return await self._run_in_worker(self._connect_or_launch_internal(cdp_url, headless, browser_type))
+    # Public asynchronous API (bridged to Proactor worker)
+    async def connect_or_launch(self, cdp_url: Optional[str] = None, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
+        return await self._run_in_worker(self._connect_to_user_browser_internal(cdp_url))
 
     async def navigate(self, url: str, wait_until: str = "load", timeout_ms: int = 30000) -> Dict[str, Any]:
         return await self._run_in_worker(self._navigate_internal(url, wait_until, timeout_ms))

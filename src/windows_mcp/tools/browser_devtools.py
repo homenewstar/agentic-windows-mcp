@@ -188,7 +188,10 @@ def register(mcp, *, get_desktop, get_analytics):
             "Interact with web elements for automated UI testing. "
             "Supported actions: 'click', 'right_click' (opens context menu), 'double_click' (select text/detail), "
             "'hover', 'hover_and_wait' (shows tooltips), 'fill', 'press_key', 'wait_for', "
-            "'drag' (drag element center to absolute page coords target_x/target_y, e.g. panel resize handles). Supports target page_id."
+            "'drag' (hold the left button and move: from a selector's center or start_x/start_y, either straight to "
+            "target_x/target_y or through 'waypoints' [[x, y], ...] for multi-segment paths like swipes and scratching; "
+            "hold_ms presses in place before moving, step_delay_ms paces the movement), "
+            "'hold' (press and hold the left button at a selector or start_x/start_y for hold_ms, then release). Supports target page_id."
         ),
         annotations=ToolAnnotations(
             title="Browser Interact",
@@ -211,6 +214,9 @@ def register(mcp, *, get_desktop, get_analytics):
         steps: int = 20,
         step_delay_ms: int = 0,
         hold_ms: int = 0,
+        waypoints: Optional[List[List[float]]] = None,
+        start_x: Optional[float] = None,
+        start_y: Optional[float] = None,
     ) -> str:
         act = action.lower()
         if act == "click":
@@ -244,14 +250,18 @@ def register(mcp, *, get_desktop, get_analytics):
         elif act == "wait_for":
             res = await manager.wait_for(selector=selector, timeout_ms=timeout_ms, page_id=page_id)
         elif act == "drag":
-            if not selector:
-                raise ValueError("Selector required for 'drag'")
-            if target_x is None or target_y is None:
-                raise ValueError("target_x and target_y required for 'drag'")
-            res = await manager.drag(selector=selector, target_x=target_x, target_y=target_y, steps=steps, step_delay_ms=step_delay_ms, hold_ms=hold_ms, page_id=page_id)
+            if not selector and start_x is None and not waypoints:
+                raise ValueError("Selector, start_x/start_y, or waypoints required for 'drag'")
+            if not waypoints and (target_x is None or target_y is None):
+                raise ValueError("target_x and target_y (or waypoints) required for 'drag'")
+            res = await manager.drag(selector=selector, target_x=target_x, target_y=target_y, steps=steps, step_delay_ms=step_delay_ms, hold_ms=hold_ms, page_id=page_id, waypoints=waypoints, start_x=start_x, start_y=start_y)
+        elif act == "hold":
+            if not selector and start_x is None:
+                raise ValueError("Selector or start_x/start_y required for 'hold'")
+            res = await manager.hold(selector=selector, hold_ms=hold_ms if hold_ms > 0 else delay_ms, page_id=page_id, start_x=start_x, start_y=start_y)
         else:
             raise ValueError(
-                f"Unknown action: {action}. Supported: click, right_click, double_click, hover, hover_and_wait, fill, press_key, wait_for, drag"
+                f"Unknown action: {action}. Supported: click, right_click, double_click, hover, hover_and_wait, fill, press_key, wait_for, drag, hold"
             )
 
         return json.dumps(res, indent=2, ensure_ascii=False)

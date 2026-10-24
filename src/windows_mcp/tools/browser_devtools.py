@@ -187,7 +187,8 @@ def register(mcp, *, get_desktop, get_analytics):
         description=(
             "Interact with web elements for automated UI testing. "
             "Supported actions: 'click', 'right_click' (opens context menu), 'double_click' (select text/detail), "
-            "'hover', 'hover_and_wait' (shows tooltips), 'fill', 'press_key', 'wait_for'. Supports target page_id."
+            "'hover', 'hover_and_wait' (shows tooltips), 'fill', 'press_key', 'wait_for', "
+            "'drag' (drag element center to absolute page coords target_x/target_y, e.g. panel resize handles). Supports target page_id."
         ),
         annotations=ToolAnnotations(
             title="Browser Interact",
@@ -205,6 +206,9 @@ def register(mcp, *, get_desktop, get_analytics):
         delay_ms: int = 500,
         timeout_ms: int = 10000,
         page_id: Optional[int] = None,
+        target_x: Optional[float] = None,
+        target_y: Optional[float] = None,
+        steps: int = 20,
     ) -> str:
         act = action.lower()
         if act == "click":
@@ -237,9 +241,15 @@ def register(mcp, *, get_desktop, get_analytics):
             res = await manager.press_key(key=key, page_id=page_id)
         elif act == "wait_for":
             res = await manager.wait_for(selector=selector, timeout_ms=timeout_ms, page_id=page_id)
+        elif act == "drag":
+            if not selector:
+                raise ValueError("Selector required for 'drag'")
+            if target_x is None or target_y is None:
+                raise ValueError("target_x and target_y required for 'drag'")
+            res = await manager.drag(selector=selector, target_x=target_x, target_y=target_y, steps=steps, page_id=page_id)
         else:
             raise ValueError(
-                f"Unknown action: {action}. Supported: click, right_click, double_click, hover, hover_and_wait, fill, press_key, wait_for"
+                f"Unknown action: {action}. Supported: click, right_click, double_click, hover, hover_and_wait, fill, press_key, wait_for, drag"
             )
 
         return json.dumps(res, indent=2, ensure_ascii=False)

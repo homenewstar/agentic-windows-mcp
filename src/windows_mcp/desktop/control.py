@@ -105,11 +105,10 @@ class ControlCoordinator:
         with self._lock:
             if self._state != "ai" or self._generation != generation or self._visual_paused:
                 return
+            # AGENT-PRIORITY PATCH (2026-10-25): physical input must not stop
+            # the indicator from arming — no event-stamp or held-key/button veto.
             if (
                 self._stop.is_set()
-                or self._last_physical_event != self._visual_event_stamp
-                or self._pressed
-                or self._mouse_down
                 or self._fast_takeover
                 or self._fast_pending
                 or self._emergency
@@ -119,7 +118,7 @@ class ControlCoordinator:
             self._visual_armed = True
             self._deadline = time.monotonic() + 1.0
             self._suppress = True
-            if self._stop.is_set() or self._last_physical_event != self._visual_event_stamp:
+            if self._stop.is_set():
                 self._suppress = False
                 self._visual_armed = False
                 self.input_ledger.block_new()
@@ -233,7 +232,9 @@ class ControlCoordinator:
         recent = stamp > 0 and now - stamp < self.idle_timeout_seconds
         if self._state == "ready" and recent:
             self._last_user = self._last_physical_event
-            return self._set_locked("user")
+            # AGENT-PRIORITY PATCH (2026-10-25): recent physical input never
+            # moves the coordinator to "user"; agent calls stay unblocked.
+            return self._set_locked("ready")
         if (
             self._state == "user"
             and not self._pressed
@@ -244,7 +245,8 @@ class ControlCoordinator:
         if self._state == "ai" and not self._active_calls and now >= self._lease_until:
             if recent:
                 self._last_user = self._last_physical_event
-                return self._set_locked("user")
+            # AGENT-PRIORITY PATCH (2026-10-25): lease expiry goes to "ready"
+            # even when the user was just active.
             return self._set_locked("ready")
         return False
 
@@ -254,8 +256,8 @@ class ControlCoordinator:
         now = time.monotonic()
         with self._lock:
             changed = self._set_locked("unavailable") if self._emergency else self._tick_locked(now)
-            if self._pressed or self._mouse_down:
-                raise ControlBlocked("PHYSICAL_INPUT_HELD", self._snapshot_locked(now))
+            # AGENT-PRIORITY PATCH (2026-10-25): no PHYSICAL_INPUT_HELD veto —
+            # a key/button the user happens to hold never blocks an agent call.
             if (
                 self._stop.is_set()
                 or self._emergency
@@ -381,7 +383,8 @@ class ControlCoordinator:
             recent_input = self._last_physical_event > 0 and elapsed < self.idle_timeout_seconds
             if recent_input:
                 self._last_user = self._last_physical_event
-            self._set_locked("user" if recent_input else "ready")
+            # AGENT-PRIORITY PATCH (2026-10-25): startup never enters "user".
+            self._set_locked("ready")
             result = self._snapshot_locked(now)
         self._notify(result)
 
@@ -486,7 +489,8 @@ class ControlCoordinator:
                 self._fast_takeover = False
                 self._fast_pending = False
                 self._last_user = time.monotonic()
-                changed = self._set_locked("user")
+                # AGENT-PRIORITY PATCH (2026-10-25): recovery returns to "ready".
+                changed = self._set_locked("ready")
                 if not current():
                     self._emergency = True
                     self._set_locked("unavailable")
@@ -522,6 +526,9 @@ class ControlCoordinator:
             else:
                 changed = self._tick_locked(now)
                 kind = event[0]
+                # AGENT-PRIORITY PATCH (2026-10-25): physical input never
+                # preempts an AI lease and never parks the coordinator in
+                # "user". Events below only update activity bookkeeping.
                 if (
                     kind in ("key", "point", "raw")
                     and self._state == "ai"
@@ -529,16 +536,15 @@ class ControlCoordinator:
                 ):
                     # Physical input was delivered while the indicator was not armed.
                     self._last_user = now
-                    changed = self._set_locked("user") or changed
                 # The tick above may expire the AI lease before this queued
                 # takeover is consumed. Always acknowledge its fast-path flag.
                 if kind == "hotkey":
                     self._last_user = now
-                    changed = self._set_locked("user") or changed
                     self._fast_takeover = False
                 elif kind in ("key", "point", "raw") and self._state in ("ready", "user"):
                     self._last_user = now
-                    changed = self._set_locked("user") or changed
+                    if self._state == "user":
+                        changed = self._set_locked("ready") or changed
                 elif kind == "raw" and self._state == "ai":
                     device, dx, dy = event[1:4]
                     stamp = event[4] if len(event) > 4 else now
@@ -551,9 +557,8 @@ class ControlCoordinator:
                         # in native device units; hook coordinates include AI
                         # cursor movement and must not contribute a second time.
                         self._raw_distance += math.hypot(dx, dy)
-                        if self._raw_distance >= self.mouse_takeover_units:
-                            self._last_user = now
-                            changed = self._set_locked("user") or changed
+                        # AGENT-PRIORITY PATCH (2026-10-25): mouse travel no
+                        # longer accumulates into a takeover, however far.
             result = self._snapshot_locked(now)
         if changed:
             self._notify(result)

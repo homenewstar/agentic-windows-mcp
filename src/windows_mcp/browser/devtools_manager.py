@@ -638,7 +638,7 @@ class BrowserDevToolsManager:
             await asyncio.sleep(delay_ms / 1000.0)
         return {"action": "hover", "selector": selector, "waited_ms": delay_ms, "status": "success"}
 
-    async def _drag_internal(self, selector: str, target_x: float, target_y: float, steps: int = 20, page_id: Optional[int] = None) -> Dict[str, Any]:
+    async def _drag_internal(self, selector: str, target_x: float, target_y: float, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         box = await page.locator(selector).first.bounding_box()
         if not box:
@@ -647,7 +647,17 @@ class BrowserDevToolsManager:
         start_y = box["y"] + box["height"] / 2
         await page.mouse.move(start_x, start_y)
         await page.mouse.down()
-        await page.mouse.move(target_x, target_y, steps=steps)
+        if hold_ms > 0:
+            await asyncio.sleep(hold_ms / 1000.0)
+        # Move in manual steps with real time gaps so rAF-driven drag
+        # handlers (panel resize, sliders) observe intermediate positions.
+        # A single instant move completes before any animation frame runs.
+        for i in range(1, steps + 1):
+            x = start_x + (target_x - start_x) * i / steps
+            y = start_y + (target_y - start_y) * i / steps
+            await page.mouse.move(x, y)
+            if step_delay_ms > 0:
+                await asyncio.sleep(step_delay_ms / 1000.0)
         await page.mouse.up()
         return {
             "action": "drag",
@@ -655,6 +665,7 @@ class BrowserDevToolsManager:
             "from": {"x": start_x, "y": start_y},
             "to": {"x": target_x, "y": target_y},
             "steps": steps,
+            "step_delay_ms": step_delay_ms,
             "status": "success",
             "target": "user_active_browser_tab",
         }
@@ -783,8 +794,8 @@ class BrowserDevToolsManager:
     async def hover(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
         return await self._run_in_worker(self._hover_internal(selector, delay_ms, page_id))
 
-    async def drag(self, selector: str, target_x: float, target_y: float, steps: int = 20, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._drag_internal(selector, target_x, target_y, steps, page_id))
+    async def drag(self, selector: str, target_x: float, target_y: float, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._drag_internal(selector, target_x, target_y, steps, step_delay_ms, hold_ms, page_id))
 
     async def press_key(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
         return await self._run_in_worker(self._press_key_internal(key, page_id))

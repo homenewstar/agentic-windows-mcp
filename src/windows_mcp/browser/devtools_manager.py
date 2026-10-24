@@ -638,34 +638,78 @@ class BrowserDevToolsManager:
             await asyncio.sleep(delay_ms / 1000.0)
         return {"action": "hover", "selector": selector, "waited_ms": delay_ms, "status": "success"}
 
-    async def _drag_internal(self, selector: str, target_x: float, target_y: float, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
+    async def _resolve_point(self, page, selector: Optional[str], start_x: Optional[float], start_y: Optional[float], waypoints: Optional[List] = None):
+        """Resolve a start point: element center, explicit coords, or first waypoint."""
+        if selector:
+            box = await page.locator(selector).first.bounding_box()
+            if not box:
+                raise ValueError(f"Element not found or has no bounding box: {selector}")
+            return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        if start_x is not None and start_y is not None:
+            return float(start_x), float(start_y)
+        if waypoints:
+            return float(waypoints[0][0]), float(waypoints[0][1])
+        raise ValueError("A selector, start_x/start_y, or waypoints is required")
+
+    async def _drag_internal(self, selector: Optional[str] = None, target_x: Optional[float] = None, target_y: Optional[float] = None, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None, waypoints: Optional[List] = None, start_x: Optional[float] = None, start_y: Optional[float] = None) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
-        box = await page.locator(selector).first.bounding_box()
-        if not box:
-            raise ValueError(f"Element not found or has no bounding box: {selector}")
-        start_x = box["x"] + box["width"] / 2
-        start_y = box["y"] + box["height"] / 2
-        await page.mouse.move(start_x, start_y)
+        sx, sy = await self._resolve_point(page, selector, start_x, start_y, waypoints)
+        # Points to visit while the button stays held down. 'waypoints' is a
+        # list of [x, y] absolute page coords visited in order (multi-segment
+        # path: swipes, zig-zag scratching, drawing). Without waypoints the
+        # drag is a single straight segment to target_x/target_y.
+        if waypoints:
+            pts = [(float(p[0]), float(p[1])) for p in waypoints]
+        elif target_x is not None and target_y is not None:
+            pts = [(float(target_x), float(target_y))]
+        else:
+            pts = []
+        await page.mouse.move(sx, sy)
         await page.mouse.down()
-        if hold_ms > 0:
-            await asyncio.sleep(hold_ms / 1000.0)
-        # Move in manual steps with real time gaps so rAF-driven drag
-        # handlers (panel resize, sliders) observe intermediate positions.
-        # A single instant move completes before any animation frame runs.
-        for i in range(1, steps + 1):
-            x = start_x + (target_x - start_x) * i / steps
-            y = start_y + (target_y - start_y) * i / steps
-            await page.mouse.move(x, y)
-            if step_delay_ms > 0:
-                await asyncio.sleep(step_delay_ms / 1000.0)
-        await page.mouse.up()
+        try:
+            if hold_ms > 0:
+                await asyncio.sleep(hold_ms / 1000.0)
+            # Move in manual steps with real time gaps so rAF-driven drag
+            # handlers (panel resize, sliders, scratch cards) observe
+            # intermediate positions. A single instant move completes before
+            # any animation frame runs.
+            cx, cy = sx, sy
+            for tx, ty in pts:
+                for i in range(1, steps + 1):
+                    x = cx + (tx - cx) * i / steps
+                    y = cy + (ty - cy) * i / steps
+                    await page.mouse.move(x, y)
+                    if step_delay_ms > 0:
+                        await asyncio.sleep(step_delay_ms / 1000.0)
+                cx, cy = tx, ty
+        finally:
+            await page.mouse.up()
         return {
             "action": "drag",
             "selector": selector,
-            "from": {"x": start_x, "y": start_y},
-            "to": {"x": target_x, "y": target_y},
-            "steps": steps,
+            "from": {"x": sx, "y": sy},
+            "waypoints": [{"x": x, "y": y} for x, y in pts],
+            "steps_per_segment": steps,
             "step_delay_ms": step_delay_ms,
+            "hold_ms": hold_ms,
+            "status": "success",
+            "target": "user_active_browser_tab",
+        }
+
+    async def _hold_internal(self, selector: Optional[str] = None, hold_ms: int = 1000, page_id: Optional[int] = None, start_x: Optional[float] = None, start_y: Optional[float] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        x, y = await self._resolve_point(page, selector, start_x, start_y)
+        await page.mouse.move(x, y)
+        await page.mouse.down()
+        try:
+            await asyncio.sleep(max(hold_ms, 0) / 1000.0)
+        finally:
+            await page.mouse.up()
+        return {
+            "action": "hold",
+            "selector": selector,
+            "at": {"x": x, "y": y},
+            "held_ms": hold_ms,
             "status": "success",
             "target": "user_active_browser_tab",
         }
@@ -794,8 +838,11 @@ class BrowserDevToolsManager:
     async def hover(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
         return await self._run_in_worker(self._hover_internal(selector, delay_ms, page_id))
 
-    async def drag(self, selector: str, target_x: float, target_y: float, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._drag_internal(selector, target_x, target_y, steps, step_delay_ms, hold_ms, page_id))
+    async def drag(self, selector: Optional[str] = None, target_x: Optional[float] = None, target_y: Optional[float] = None, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None, waypoints: Optional[List] = None, start_x: Optional[float] = None, start_y: Optional[float] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._drag_internal(selector=selector, target_x=target_x, target_y=target_y, steps=steps, step_delay_ms=step_delay_ms, hold_ms=hold_ms, page_id=page_id, waypoints=waypoints, start_x=start_x, start_y=start_y))
+
+    async def hold(self, selector: Optional[str] = None, hold_ms: int = 1000, page_id: Optional[int] = None, start_x: Optional[float] = None, start_y: Optional[float] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._hold_internal(selector=selector, hold_ms=hold_ms, page_id=page_id, start_x=start_x, start_y=start_y))
 
     async def press_key(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
         return await self._run_in_worker(self._press_key_internal(key, page_id))

@@ -638,6 +638,27 @@ class BrowserDevToolsManager:
             await asyncio.sleep(delay_ms / 1000.0)
         return {"action": "hover", "selector": selector, "waited_ms": delay_ms, "status": "success"}
 
+    async def _drag_internal(self, selector: str, target_x: float, target_y: float, steps: int = 20, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        box = await page.locator(selector).first.bounding_box()
+        if not box:
+            raise ValueError(f"Element not found or has no bounding box: {selector}")
+        start_x = box["x"] + box["width"] / 2
+        start_y = box["y"] + box["height"] / 2
+        await page.mouse.move(start_x, start_y)
+        await page.mouse.down()
+        await page.mouse.move(target_x, target_y, steps=steps)
+        await page.mouse.up()
+        return {
+            "action": "drag",
+            "selector": selector,
+            "from": {"x": start_x, "y": start_y},
+            "to": {"x": target_x, "y": target_y},
+            "steps": steps,
+            "status": "success",
+            "target": "user_active_browser_tab",
+        }
+
     async def _press_key_internal(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         await page.keyboard.press(key)
@@ -761,6 +782,9 @@ class BrowserDevToolsManager:
 
     async def hover(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
         return await self._run_in_worker(self._hover_internal(selector, delay_ms, page_id))
+
+    async def drag(self, selector: str, target_x: float, target_y: float, steps: int = 20, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._drag_internal(selector, target_x, target_y, steps, page_id))
 
     async def press_key(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
         return await self._run_in_worker(self._press_key_internal(key, page_id))

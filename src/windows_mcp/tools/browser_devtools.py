@@ -1,7 +1,7 @@
 """Browser DevTools tools — provides Chrome DevTools Protocol & Playwright automation.
 
 Enables agents to scrape complex web pages, dissect HTML/CSS structures, test UI interactions,
-and debug frontend network/console logs like chrome-devtools-mcp.
+and debug frontend network/console logs like chrome-devtools-mcp directly on the user's running browser.
 """
 
 from typing import Any, List, Optional
@@ -16,11 +16,7 @@ def register(mcp, *, get_desktop, get_analytics):
 
     @mcp.tool(
         name="Browser_Connect",
-        description=(
-            "Connect to Chrome/Edge via Chrome DevTools Protocol (CDP port 9222) or launch a dedicated "
-            "automation browser. Supports hybrid mode: attaches to user's running browser if available, "
-            "otherwise spins up an isolated Playwright browser."
-        ),
+        description="Connect directly to the user's running browser (Chrome, Edge, Brave) via DevTools CDP WebSocket.",
         annotations=ToolAnnotations(
             title="Browser Connect",
             readOnlyHint=False,
@@ -29,17 +25,13 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
-    async def browser_connect(
-        cdp_url: str = "http://localhost:9222",
-        headless: bool = False,
-        browser_type: str = "chromium",
-    ) -> str:
-        res = await manager.connect_or_launch(cdp_url=cdp_url, headless=headless, browser_type=browser_type)
+    async def browser_connect(cdp_url: Optional[str] = None) -> str:
+        res = await manager.connect_or_launch(cdp_url=cdp_url)
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
         name="Browser_Navigate",
-        description="Navigate the browser to a URL with configurable wait condition (load, domcontentloaded, networkidle).",
+        description="Navigate a browser tab to a URL with configurable wait condition (load, domcontentloaded, networkidle). Can target a specific page_id.",
         annotations=ToolAnnotations(
             title="Browser Navigate",
             readOnlyHint=False,
@@ -52,16 +44,14 @@ def register(mcp, *, get_desktop, get_analytics):
         url: str,
         wait_until: str = "load",
         timeout_ms: int = 30000,
+        page_id: Optional[int] = None,
     ) -> str:
-        res = await manager.navigate(url=url, wait_until=wait_until, timeout_ms=timeout_ms)
+        res = await manager.navigate(url=url, wait_until=wait_until, timeout_ms=timeout_ms, page_id=page_id)
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
         name="Browser_GetPageSnapshot",
-        description=(
-            "Extract and dissect the page's HTML structure or text content. Cleans noisy elements like "
-            "base64 images, large SVGs, and inline scripts to keep LLM context clean. Optionally scoped to a CSS selector."
-        ),
+        description="Extract and dissect the page's HTML structure or text content on the active tab or specific page_id.",
         annotations=ToolAnnotations(
             title="Browser Page Snapshot",
             readOnlyHint=True,
@@ -74,16 +64,14 @@ def register(mcp, *, get_desktop, get_analytics):
         selector: Optional[str] = None,
         format_type: str = "clean_html",
         max_length: int = 15000,
+        page_id: Optional[int] = None,
     ) -> str:
-        res = await manager.get_page_snapshot(selector=selector, format_type=format_type, max_length=max_length)
+        res = await manager.get_page_snapshot(selector=selector, format_type=format_type, max_length=max_length, page_id=page_id)
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
         name="Browser_GetCssStyles",
-        description=(
-            "Dissect CSS styles and box-model layout of elements matching a CSS selector. "
-            "Returns computed styles (display, position, flex/grid, colors, typography), bounding box rect, and visibility."
-        ),
+        description="Dissect CSS styles and box-model layout of elements matching a CSS selector.",
         annotations=ToolAnnotations(
             title="Browser Get CSS Styles",
             readOnlyHint=True,
@@ -95,13 +83,69 @@ def register(mcp, *, get_desktop, get_analytics):
     async def browser_get_css_styles(
         selector: str,
         properties: Optional[List[str]] = None,
+        page_id: Optional[int] = None,
     ) -> str:
-        res = await manager.get_css_styles(selector=selector, properties=properties)
+        res = await manager.get_css_styles(selector=selector, properties=properties, page_id=page_id)
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_GetComputedStyle",
+        description=(
+            "Advanced computed styles extraction: captures element styles, ::before and ::after pseudo-elements, "
+            "CSS animations/transitions, and generates a ready-to-use clean CSS snippet for cloning or frontend debugging."
+        ),
+        annotations=ToolAnnotations(
+            title="Browser Get Computed Style",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_get_computed_style(
+        selector: str,
+        include_pseudo: bool = True,
+        include_animations: bool = True,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.get_advanced_computed_styles(
+            selector=selector,
+            include_pseudo=include_pseudo,
+            include_animations=include_animations,
+            page_id=page_id,
+        )
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_Highlight",
+        description="Visually highlight an element on the user's screen with a vibrant red outline and box-shadow for real-time visual debugging.",
+        annotations=ToolAnnotations(
+            title="Browser Highlight",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_highlight(
+        selector: str,
+        color: str = "#ef4444",
+        duration_ms: int = 5000,
+        scroll_into_view: bool = True,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.highlight_element(
+            selector=selector,
+            color=color,
+            duration_ms=duration_ms,
+            scroll_into_view=scroll_into_view,
+            page_id=page_id,
+        )
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
         name="Browser_EvaluateScript",
-        description="Execute arbitrary JavaScript directly in the browser's context (access window, document, localStorage, React/Vue state).",
+        description="Execute arbitrary JavaScript directly in the browser's context. Supports targeting a specific page_id.",
         annotations=ToolAnnotations(
             title="Browser Evaluate Script",
             readOnlyHint=False,
@@ -110,8 +154,12 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
-    async def browser_evaluate_script(script: str, arg: Optional[Any] = None) -> str:
-        res = await manager.evaluate_script(script=script, arg=arg)
+    async def browser_evaluate_script(
+        script: str,
+        arg: Optional[Any] = None,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.evaluate_script(script=script, arg=arg, page_id=page_id)
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
@@ -129,13 +177,18 @@ def register(mcp, *, get_desktop, get_analytics):
         selector: str,
         attributes: Optional[List[str]] = None,
         limit: int = 50,
+        page_id: Optional[int] = None,
     ) -> str:
-        res = await manager.query_elements(selector=selector, attributes=attributes, limit=limit)
+        res = await manager.query_elements(selector=selector, attributes=attributes, limit=limit, page_id=page_id)
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
         name="Browser_Interact",
-        description="Interact with web elements for automated UI testing (action: 'click', 'fill', 'hover', 'press_key', 'wait_for').",
+        description=(
+            "Interact with web elements for automated UI testing. "
+            "Supported actions: 'click', 'right_click' (opens context menu), 'double_click' (select text/detail), "
+            "'hover', 'hover_and_wait' (shows tooltips), 'fill', 'press_key', 'wait_for'. Supports target page_id."
+        ),
         annotations=ToolAnnotations(
             title="Browser Interact",
             readOnlyHint=False,
@@ -149,35 +202,51 @@ def register(mcp, *, get_desktop, get_analytics):
         selector: Optional[str] = None,
         value: Optional[str] = None,
         key: Optional[str] = None,
+        delay_ms: int = 500,
         timeout_ms: int = 10000,
+        page_id: Optional[int] = None,
     ) -> str:
         act = action.lower()
         if act == "click":
             if not selector:
                 raise ValueError("Selector required for 'click'")
-            res = await manager.click(selector=selector)
-        elif act == "fill":
-            if not selector or value is None:
-                raise ValueError("Selector and value required for 'fill'")
-            res = await manager.fill(selector=selector, value=value)
+            res = await manager.click(selector=selector, button="left", click_count=1, page_id=page_id)
+        elif act == "right_click":
+            if not selector:
+                raise ValueError("Selector required for 'right_click'")
+            res = await manager.click(selector=selector, button="right", click_count=1, page_id=page_id)
+        elif act == "double_click":
+            if not selector:
+                raise ValueError("Selector required for 'double_click'")
+            res = await manager.click(selector=selector, button="left", click_count=2, page_id=page_id)
         elif act == "hover":
             if not selector:
                 raise ValueError("Selector required for 'hover'")
-            res = await manager.hover(selector=selector)
+            res = await manager.hover(selector=selector, delay_ms=0, page_id=page_id)
+        elif act == "hover_and_wait":
+            if not selector:
+                raise ValueError("Selector required for 'hover_and_wait'")
+            res = await manager.hover(selector=selector, delay_ms=delay_ms, page_id=page_id)
+        elif act == "fill":
+            if not selector or value is None:
+                raise ValueError("Selector and value required for 'fill'")
+            res = await manager.fill(selector=selector, value=value, page_id=page_id)
         elif act == "press_key":
             if not key:
                 raise ValueError("Key required for 'press_key'")
-            res = await manager.press_key(key=key)
+            res = await manager.press_key(key=key, page_id=page_id)
         elif act == "wait_for":
-            res = await manager.wait_for(selector=selector, timeout_ms=timeout_ms)
+            res = await manager.wait_for(selector=selector, timeout_ms=timeout_ms, page_id=page_id)
         else:
-            raise ValueError(f"Unknown action: {action}. Supported: click, fill, hover, press_key, wait_for")
+            raise ValueError(
+                f"Unknown action: {action}. Supported: click, right_click, double_click, hover, hover_and_wait, fill, press_key, wait_for"
+            )
 
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(
         name="Browser_TakeScreenshot",
-        description="Capture a screenshot of the active web page, viewport, or specific element selector.",
+        description="Capture a screenshot of the active web page, viewport, or specific element selector. Supports target page_id.",
         annotations=ToolAnnotations(
             title="Browser Take Screenshot",
             readOnlyHint=True,
@@ -190,8 +259,9 @@ def register(mcp, *, get_desktop, get_analytics):
         selector: Optional[str] = None,
         full_page: bool = False,
         save_path: Optional[str] = None,
+        page_id: Optional[int] = None,
     ) -> str:
-        res = await manager.take_screenshot(selector=selector, full_page=full_page, path=save_path)
+        res = await manager.take_screenshot(selector=selector, full_page=full_page, path=save_path, page_id=page_id)
         return json.dumps({
             "status": "success",
             "size_bytes": res["size_bytes"],

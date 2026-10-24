@@ -10,6 +10,8 @@ BROWSER_TOOLS = frozenset(
         "Browser_Navigate",
         "Browser_GetPageSnapshot",
         "Browser_GetCssStyles",
+        "Browser_GetComputedStyle",
+        "Browser_Highlight",
         "Browser_EvaluateScript",
         "Browser_QueryElements",
         "Browser_Interact",

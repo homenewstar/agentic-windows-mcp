@@ -44,7 +44,6 @@ def resolve_user_browser_endpoint() -> Optional[str]:
             except Exception as e:
                 logger.debug("Failed reading %s: %s", path, e)
 
-    # Fallback to standard debugging port
     return "http://127.0.0.1:9222"
 
 
@@ -82,7 +81,7 @@ class BrowserDevToolsManager:
         self.network_details: Dict[str, Dict[str, Any]] = {}
         self._monitored_page_ids: set[int] = set()
 
-        # Dedicated worker loop running ProactorEventLoop (required for Windows subprocesses / websockets)
+        # Dedicated worker loop running ProactorEventLoop
         self._worker_loop: Optional[asyncio.AbstractEventLoop] = None
         self._worker_thread: Optional[threading.Thread] = None
         self._ready_event = threading.Event()
@@ -180,7 +179,6 @@ class BrowserDevToolsManager:
         page.on("response", handle_response)
 
     async def _connect_to_user_browser_internal(self, custom_endpoint: Optional[str] = None) -> Dict[str, Any]:
-        """Connect directly to the user's running browser via DevTools CDP WebSocket."""
         await self._init_playwright()
 
         if self.browser and self.browser.is_connected() and self.context:
@@ -205,7 +203,6 @@ class BrowserDevToolsManager:
             )
             self.connected_endpoint = endpoint
         except Exception as e:
-            # If connection failed, check if user's Chrome can be launched with remote debugging
             browser_exe = find_system_browser_executable()
             if browser_exe:
                 logger.info("Attempting to launch user browser %s with remote-debugging-port=9222", browser_exe)
@@ -274,17 +271,22 @@ class BrowserDevToolsManager:
         except Exception:
             return {"page_id": self.active_page_index, "url": getattr(p, "url", "unknown")}
 
-    async def _get_active_page_internal(self) -> Page:
+    async def _get_page_by_id_or_active(self, page_id: Optional[int] = None) -> Page:
         if not self.browser or not self.browser.is_connected() or not self.pages:
             await self._connect_to_user_browser_internal()
 
         await self._refresh_pages()
         if not self.pages:
-            # If user has no tabs open, open one in the user's browser
             page = await self.context.new_page()
             self._attach_page_listeners(page)
             self.pages = [page]
             self.active_page_index = 0
+            return page
+
+        if page_id is not None:
+            if 0 <= page_id < len(self.pages) and not self.pages[page_id].is_closed():
+                return self.pages[page_id]
+            raise ValueError(f"Invalid or closed page_id: {page_id}. Available tabs: 0 to {len(self.pages) - 1}")
 
         return self.pages[self.active_page_index]
 
@@ -302,18 +304,19 @@ class BrowserDevToolsManager:
                 return await page.evaluate(script)
             raise
 
-    async def _navigate_internal(self, url: str, wait_until: str, timeout_ms: int) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _navigate_internal(self, url: str, wait_until: str, timeout_ms: int, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         res = await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
         return {
+            "page_id": self.pages.index(page) if page in self.pages else self.active_page_index,
             "url": page.url,
             "title": await page.title(),
             "status": res.status if res else 200,
             "target": "user_active_browser_tab",
         }
 
-    async def _get_page_snapshot_internal(self, selector: Optional[str], format_type: str, max_length: int) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _get_page_snapshot_internal(self, selector: Optional[str], format_type: str, max_length: int, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         if selector:
             element = await page.wait_for_selector(selector, state="attached", timeout=5000)
             if not element:
@@ -350,8 +353,8 @@ class BrowserDevToolsManager:
             "total_length": len(clean_str),
         }
 
-    async def _get_css_styles_internal(self, selector: str, properties: Optional[List[str]]) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _get_css_styles_internal(self, selector: str, properties: Optional[List[str]], page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         await page.wait_for_selector(selector, state="attached", timeout=5000)
         default_props = [
             "display", "position", "flex-direction", "grid-template-columns",
@@ -395,12 +398,191 @@ class BrowserDevToolsManager:
             raise ValueError(f"Element matching selector '{selector}' was not found.")
         return result
 
-    async def _evaluate_script_internal(self, script: str, arg: Any) -> Any:
-        page = await self._get_active_page_internal()
+    async def _get_advanced_computed_styles_internal(
+        self,
+        selector: str,
+        include_pseudo: bool = True,
+        include_animations: bool = True,
+        page_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Deep dissection: gets element styles, ::before, ::after pseudo-elements, and exports CSS snippet."""
+        page = await self._get_page_by_id_or_active(page_id)
+        await page.wait_for_selector(selector, state="attached", timeout=5000)
+
+        script = """
+        ({ selector, includePseudo, includeAnimations }) => {
+            const el = document.querySelector(selector);
+            if (!el) return null;
+
+            const extractKeyStyles = (computed) => {
+                const props = [
+                    'display', 'position', 'top', 'right', 'bottom', 'left',
+                    'flex-direction', 'justify-content', 'align-items', 'gap',
+                    'grid-template-columns', 'grid-template-rows',
+                    'width', 'min-width', 'max-width', 'height', 'min-height', 'max-height',
+                    'box-sizing', 'margin', 'padding', 'border', 'border-radius',
+                    'background', 'background-color', 'color',
+                    'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-align',
+                    'box-shadow', 'opacity', 'visibility', 'z-index', 'overflow',
+                    'transform', 'transition', 'animation'
+                ];
+                const res = {};
+                for (const p of props) {
+                    const val = computed.getPropertyValue(p);
+                    if (val && val !== 'none' && val !== 'normal' && val !== 'auto' && val !== 'rgba(0, 0, 0, 0)') {
+                        res[p] = val;
+                    }
+                }
+                return res;
+            };
+
+            const mainComputed = window.getComputedStyle(el);
+            const mainStyles = extractKeyStyles(mainComputed);
+            const rect = el.getBoundingClientRect();
+
+            const result = {
+                selector: selector,
+                tagName: el.tagName.toLowerCase(),
+                id: el.id || null,
+                className: el.className || null,
+                boundingBox: {
+                    x: Math.round(rect.x),
+                    y: Math.round(rect.y),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                },
+                computedStyles: mainStyles,
+                pseudoElements: {},
+                animations: {},
+            };
+
+            if (includePseudo) {
+                for (const pseudo of ['::before', '::after']) {
+                    const pComputed = window.getComputedStyle(el, pseudo);
+                    const content = pComputed.getPropertyValue('content');
+                    if (content && content !== 'none' && content !== 'normal' && content !== '""') {
+                        result.pseudoElements[pseudo] = {
+                            content: content,
+                            styles: extractKeyStyles(pComputed),
+                        };
+                    }
+                }
+            }
+
+            if (includeAnimations) {
+                const animName = mainComputed.getPropertyValue('animation-name');
+                const transition = mainComputed.getPropertyValue('transition');
+                if (animName && animName !== 'none') {
+                    result.animations['animation'] = {
+                        name: animName,
+                        duration: mainComputed.getPropertyValue('animation-duration'),
+                        timingFunction: mainComputed.getPropertyValue('animation-timing-function'),
+                        delay: mainComputed.getPropertyValue('animation-delay'),
+                        iterationCount: mainComputed.getPropertyValue('animation-iteration-count'),
+                    };
+                }
+                if (transition && transition !== 'none' && transition !== 'all 0s ease 0s') {
+                    result.animations['transition'] = transition;
+                }
+            }
+
+            // Generate clean CSS Snippet
+            let cssSnippet = `${selector} {\\n`;
+            for (const [k, v] of Object.entries(mainStyles)) {
+                cssSnippet += `  ${k}: ${v};\\n`;
+            }
+            cssSnippet += `}\\n`;
+
+            for (const [pseudo, data] of Object.entries(result.pseudoElements)) {
+                cssSnippet += `\\n${selector}${pseudo} {\\n  content: ${data.content};\\n`;
+                for (const [k, v] of Object.entries(data.styles)) {
+                    if (k !== 'content') cssSnippet += `  ${k}: ${v};\\n`;
+                }
+                cssSnippet += `}\\n`;
+            }
+            result.cssSnippet = cssSnippet;
+
+            return result;
+        }
+        """
+        result = await self._safe_evaluate(page, script, {
+            "selector": selector,
+            "includePseudo": include_pseudo,
+            "includeAnimations": include_animations,
+        })
+        if not result:
+            raise ValueError(f"Element matching selector '{selector}' was not found.")
+        return result
+
+    async def _highlight_element_internal(
+        self,
+        selector: str,
+        color: str = "#ef4444",
+        duration_ms: int = 5000,
+        scroll_into_view: bool = True,
+        page_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Highlights an element on the user's screen with a vibrant border for visual debugging."""
+        page = await self._get_page_by_id_or_active(page_id)
+        await page.wait_for_selector(selector, state="attached", timeout=5000)
+
+        script = """
+        ({ selector, color, durationMs, scrollIntoView }) => {
+            const el = document.querySelector(selector);
+            if (!el) return null;
+
+            if (scrollIntoView) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            const originalOutline = el.style.outline;
+            const originalBoxShadow = el.style.boxShadow;
+            const originalTransition = el.style.transition;
+
+            el.style.transition = 'outline 0.2s ease, box-shadow 0.2s ease';
+            el.style.outline = `3px solid ${color}`;
+            el.style.boxShadow = `0 0 12px ${color}`;
+
+            if (durationMs > 0) {
+                setTimeout(() => {
+                    el.style.outline = originalOutline;
+                    el.style.boxShadow = originalBoxShadow;
+                    el.style.transition = originalTransition;
+                }, durationMs);
+            }
+
+            const rect = el.getBoundingClientRect();
+            return {
+                status: 'highlighted',
+                selector: selector,
+                color: color,
+                duration_ms: durationMs,
+                boundingBox: {
+                    x: Math.round(rect.x),
+                    y: Math.round(rect.y),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                },
+                isVisible: (rect.width > 0 && rect.height > 0),
+            };
+        }
+        """
+        result = await self._safe_evaluate(page, script, {
+            "selector": selector,
+            "color": color,
+            "durationMs": duration_ms,
+            "scrollIntoView": scroll_into_view,
+        })
+        if not result:
+            raise ValueError(f"Element matching selector '{selector}' was not found.")
+        return result
+
+    async def _evaluate_script_internal(self, script: str, arg: Any = None, page_id: Optional[int] = None) -> Any:
+        page = await self._get_page_by_id_or_active(page_id)
         return await self._safe_evaluate(page, script, arg)
 
-    async def _query_elements_internal(self, selector: str, attributes: Optional[List[str]], limit: int) -> List[Dict[str, Any]]:
-        page = await self._get_active_page_internal()
+    async def _query_elements_internal(self, selector: str, attributes: Optional[List[str]], limit: int, page_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        page = await self._get_page_by_id_or_active(page_id)
         await page.wait_for_selector(selector, state="attached", timeout=5000)
         attr_list = attributes or ["id", "class", "href", "src", "type", "value", "name", "role", "aria-label"]
         script = """
@@ -432,28 +614,37 @@ class BrowserDevToolsManager:
         """
         return await self._safe_evaluate(page, script, {"selector": selector, "attrList": attr_list, "limit": limit})
 
-    async def _click_internal(self, selector: str, button: str, click_count: int) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _click_internal(self, selector: str, button: str = "left", click_count: int = 1, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         await page.click(selector, button=button, click_count=click_count)
-        return {"action": "click", "selector": selector, "status": "success", "target": "user_active_browser_tab"}
+        return {
+            "action": "click",
+            "button": button,
+            "click_count": click_count,
+            "selector": selector,
+            "status": "success",
+            "target": "user_active_browser_tab",
+        }
 
-    async def _fill_internal(self, selector: str, value: str) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _fill_internal(self, selector: str, value: str, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         await page.fill(selector, value)
         return {"action": "fill", "selector": selector, "value_length": len(value), "status": "success"}
 
-    async def _hover_internal(self, selector: str) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _hover_internal(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         await page.hover(selector)
-        return {"action": "hover", "selector": selector, "status": "success"}
+        if delay_ms > 0:
+            await asyncio.sleep(delay_ms / 1000.0)
+        return {"action": "hover", "selector": selector, "waited_ms": delay_ms, "status": "success"}
 
-    async def _press_key_internal(self, key: str) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _press_key_internal(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         await page.keyboard.press(key)
         return {"action": "press_key", "key": key, "status": "success"}
 
-    async def _wait_for_internal(self, selector: Optional[str], state: str, timeout_ms: int) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _wait_for_internal(self, selector: Optional[str], state: str, timeout_ms: int, page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         if selector:
             await page.wait_for_selector(selector, state=state, timeout=timeout_ms)
             return {"waited_for": "selector", "selector": selector, "state": state, "status": "resolved"}
@@ -461,8 +652,8 @@ class BrowserDevToolsManager:
             await page.wait_for_load_state(state if state in ["load", "domcontentloaded", "networkidle"] else "load", timeout=timeout_ms)
             return {"waited_for": "load_state", "state": state, "status": "resolved"}
 
-    async def _take_screenshot_internal(self, selector: Optional[str], full_page: bool, path: Optional[str]) -> Dict[str, Any]:
-        page = await self._get_active_page_internal()
+    async def _take_screenshot_internal(self, selector: Optional[str], full_page: bool, path: Optional[str], page_id: Optional[int] = None) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
         if selector:
             el = await page.wait_for_selector(selector, state="attached", timeout=5000)
             if not el:
@@ -508,7 +699,7 @@ class BrowserDevToolsManager:
         raise ValueError(f"Invalid or closed page_id: {page_id}")
 
     async def _new_page_internal(self, url: str) -> Dict[str, Any]:
-        await self._get_active_page_internal()
+        await self._get_page_by_id_or_active()
         page = await self.context.new_page()
         self._attach_page_listeners(page)
         self.pages.append(page)
@@ -530,7 +721,6 @@ class BrowserDevToolsManager:
         raise ValueError(f"Invalid page_id: {target_idx}")
 
     async def _close_internal(self) -> None:
-        # Disconnect CDP cleanly without terminating user's desktop browser
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
@@ -542,38 +732,44 @@ class BrowserDevToolsManager:
     async def connect_or_launch(self, cdp_url: Optional[str] = None, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
         return await self._run_in_worker(self._connect_to_user_browser_internal(cdp_url))
 
-    async def navigate(self, url: str, wait_until: str = "load", timeout_ms: int = 30000) -> Dict[str, Any]:
-        return await self._run_in_worker(self._navigate_internal(url, wait_until, timeout_ms))
+    async def navigate(self, url: str, wait_until: str = "load", timeout_ms: int = 30000, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._navigate_internal(url, wait_until, timeout_ms, page_id))
 
-    async def get_page_snapshot(self, selector: Optional[str] = None, format_type: str = "clean_html", max_length: int = 15000) -> Dict[str, Any]:
-        return await self._run_in_worker(self._get_page_snapshot_internal(selector, format_type, max_length))
+    async def get_page_snapshot(self, selector: Optional[str] = None, format_type: str = "clean_html", max_length: int = 15000, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._get_page_snapshot_internal(selector, format_type, max_length, page_id))
 
-    async def get_css_styles(self, selector: str, properties: Optional[List[str]] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._get_css_styles_internal(selector, properties))
+    async def get_css_styles(self, selector: str, properties: Optional[List[str]] = None, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._get_css_styles_internal(selector, properties, page_id))
 
-    async def evaluate_script(self, script: str, arg: Any = None) -> Any:
-        return await self._run_in_worker(self._evaluate_script_internal(script, arg))
+    async def get_advanced_computed_styles(self, selector: str, include_pseudo: bool = True, include_animations: bool = True, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._get_advanced_computed_styles_internal(selector, include_pseudo, include_animations, page_id))
 
-    async def query_elements(self, selector: str, attributes: Optional[List[str]] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        return await self._run_in_worker(self._query_elements_internal(selector, attributes, limit))
+    async def highlight_element(self, selector: str, color: str = "#ef4444", duration_ms: int = 5000, scroll_into_view: bool = True, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._highlight_element_internal(selector, color, duration_ms, scroll_into_view, page_id))
 
-    async def click(self, selector: str, button: str = "left", click_count: int = 1) -> Dict[str, Any]:
-        return await self._run_in_worker(self._click_internal(selector, button, click_count))
+    async def evaluate_script(self, script: str, arg: Any = None, page_id: Optional[int] = None) -> Any:
+        return await self._run_in_worker(self._evaluate_script_internal(script, arg, page_id))
 
-    async def fill(self, selector: str, value: str) -> Dict[str, Any]:
-        return await self._run_in_worker(self._fill_internal(selector, value))
+    async def query_elements(self, selector: str, attributes: Optional[List[str]] = None, limit: int = 50, page_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        return await self._run_in_worker(self._query_elements_internal(selector, attributes, limit, page_id))
 
-    async def hover(self, selector: str) -> Dict[str, Any]:
-        return await self._run_in_worker(self._hover_internal(selector))
+    async def click(self, selector: str, button: str = "left", click_count: int = 1, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._click_internal(selector, button, click_count, page_id))
 
-    async def press_key(self, key: str) -> Dict[str, Any]:
-        return await self._run_in_worker(self._press_key_internal(key))
+    async def fill(self, selector: str, value: str, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._fill_internal(selector, value, page_id))
 
-    async def wait_for(self, selector: Optional[str] = None, state: str = "visible", timeout_ms: int = 10000) -> Dict[str, Any]:
-        return await self._run_in_worker(self._wait_for_internal(selector, state, timeout_ms))
+    async def hover(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._hover_internal(selector, delay_ms, page_id))
 
-    async def take_screenshot(self, selector: Optional[str] = None, full_page: bool = False, path: Optional[str] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._take_screenshot_internal(selector, full_page, path))
+    async def press_key(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._press_key_internal(key, page_id))
+
+    async def wait_for(self, selector: Optional[str] = None, state: str = "visible", timeout_ms: int = 10000, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._wait_for_internal(selector, state, timeout_ms, page_id))
+
+    async def take_screenshot(self, selector: Optional[str] = None, full_page: bool = False, path: Optional[str] = None, page_id: Optional[int] = None) -> Dict[str, Any]:
+        return await self._run_in_worker(self._take_screenshot_internal(selector, full_page, path, page_id))
 
     async def list_pages(self) -> List[Dict[str, Any]]:
         return await self._run_in_worker(self._list_pages_internal())

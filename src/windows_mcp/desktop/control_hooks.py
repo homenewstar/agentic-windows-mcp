@@ -81,8 +81,12 @@ def physical_key(owner: Any, code: int, wparam: int, lparam: int) -> int:
                 owner._quarantine.discard(vk)
                 owner._queue(("key",))  # Idle starts after the last chord key is released.
             return 1
+        # AGENT-PRIORITY PATCH (2026-10-25): the Ctrl+Alt+Shift+Backspace
+        # takeover chord is disabled — it falls through and is treated (and
+        # swallowed, while the AI indicator is armed) like any other key.
         if (
-            down
+            False
+            and down
             and vk == 0x08
             and not was_down
             and not owner._fast_takeover

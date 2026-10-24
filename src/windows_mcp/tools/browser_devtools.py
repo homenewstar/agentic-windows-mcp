@@ -209,6 +209,8 @@ def register(mcp, *, get_desktop, get_analytics):
         target_x: Optional[float] = None,
         target_y: Optional[float] = None,
         steps: int = 20,
+        step_delay_ms: int = 0,
+        hold_ms: int = 0,
     ) -> str:
         act = action.lower()
         if act == "click":
@@ -246,7 +248,7 @@ def register(mcp, *, get_desktop, get_analytics):
                 raise ValueError("Selector required for 'drag'")
             if target_x is None or target_y is None:
                 raise ValueError("target_x and target_y required for 'drag'")
-            res = await manager.drag(selector=selector, target_x=target_x, target_y=target_y, steps=steps, page_id=page_id)
+            res = await manager.drag(selector=selector, target_x=target_x, target_y=target_y, steps=steps, step_delay_ms=step_delay_ms, hold_ms=hold_ms, page_id=page_id)
         else:
             raise ValueError(
                 f"Unknown action: {action}. Supported: click, right_click, double_click, hover, hover_and_wait, fill, press_key, wait_for, drag"

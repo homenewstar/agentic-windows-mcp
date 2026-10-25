@@ -77,31 +77,53 @@ class _Script:
         return self._values.pop(0) if self._values else False
 
 
-def test_monitor_yields_on_appear_and_restores_on_disappear(
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_monitor_yields_on_appear_and_holds_release_for_10s(
     monkeypatch: pytest.MonkeyPatch,
 ):
     calls: list[bool] = []
     monkeypatch.setattr(consent, "_yield_handler", calls.append)
+    clock = _Clock()
     monitor = consent.ConsentDialogMonitor(
-        detector=_Script([False, True, True, False, True, False])
+        detector=_Script([False, True, True, False, False, False]),
+        clock=clock,
     )
     assert monitor.poll_once() is False
     assert calls == []
+    # Dialog appears at t=0: release, held until t=10.
     assert monitor.poll_once() is True
     assert calls == [True]
-    # Still present: re-asserted (self-healing), never treated as a toggle.
+    # Still present at t=1: re-asserted, hold renewed to t=11.
+    clock.now = 1.0
     assert monitor.poll_once() is True
     assert calls == [True, True]
+    # Dialog flickers away at t=2: still inside the hold -- no restore.
+    clock.now = 2.0
+    assert monitor.poll_once() is False
+    assert calls == [True, True]
+    # Still gone at t=10.9: hold (until 11) not yet elapsed.
+    clock.now = 10.9
+    assert monitor.poll_once() is False
+    assert calls == [True, True]
+    # t=11: window elapsed -> suppression restored exactly once.
+    clock.now = 11.0
     assert monitor.poll_once() is False
     assert calls == [True, True, False]
-    assert monitor.poll_once() is True
-    assert calls == [True, True, False, True]
-    assert monitor.poll_once() is False
-    assert calls == [True, True, False, True, False]
 
 
 def test_monitor_without_handler_is_quiet(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(consent, "_yield_handler", None)
-    monitor = consent.ConsentDialogMonitor(detector=_Script([True, False]))
+    clock = _Clock()
+    monitor = consent.ConsentDialogMonitor(
+        detector=_Script([True, False]), clock=clock
+    )
     assert monitor.poll_once() is True
+    clock.now = 100.0
     assert monitor.poll_once() is False

@@ -213,9 +213,12 @@ class BrowserDevToolsManager:
 
         logger.info("Connecting to user browser at %s", endpoint)
         try:
+            # 30s (not 4s): when Chrome shows its remote-debugging consent
+            # dialog, the handshake stalls until the user clicks Allow --
+            # give them the full dialog-yield window to answer it.
             self.browser = await asyncio.wait_for(
                 self.playwright.chromium.connect_over_cdp(endpoint),
-                timeout=4.0,
+                timeout=30.0,
             )
             self.connected_endpoint = endpoint
         except Exception as e:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Callable, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,11 @@ MAX_WALK_NODES = 2500
 # in the scan so the per-second poll stays cheap.
 MAX_DIALOG_WINDOW_WIDTH = 1000
 MAX_DIALOG_WINDOW_HEIGHT = 800
+# Once the dialog is seen, input stays released for at least this long
+# after the last sighting: a human needs a few seconds to notice the
+# dialog, move the mouse and click -- a per-poll release snapped shut
+# again before the click landed. Every new sighting renews the window.
+YIELD_HOLD_SECONDS = 10.0
 
 # (control_type_name, name) pairs gathered from one window's UI subtree.
 NameEntry = Tuple[str, str]
@@ -169,20 +175,28 @@ class ConsentDialogMonitor:
     """Poll for the consent dialog and drive the input-yield handler.
 
     While the dialog is present the handler is (re)asserted with True on
-    every pass, so a missed call self-heals; when the dialog disappears
-    the handler is called once with False to restore suppression.
+    every pass, so a missed call self-heals. The release is then HELD:
+    suppression is only restored once the dialog has been absent for a
+    full ``hold_seconds`` window since its last sighting, so the user
+    always gets the whole window to reach the mouse and click, even if
+    individual scans flicker.
     """
 
     def __init__(
         self,
         interval: float = 1.0,
         detector: Callable[[], bool] = detect_consent_dialog,
+        hold_seconds: float = YIELD_HOLD_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.interval = interval
         self._detector = detector
+        self._hold_seconds = hold_seconds
+        self._clock = clock
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._yielding = False
+        self._yield_until = 0.0
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -210,6 +224,7 @@ class ConsentDialogMonitor:
     def poll_once(self) -> bool:
         """One detection pass; returns whether the dialog is present."""
         present = bool(self._detector())
+        now = self._clock()
         if present:
             if not self._yielding:
                 logger.info(
@@ -217,10 +232,14 @@ class ConsentDialogMonitor:
                     "releasing input suppression so the user can answer it"
                 )
             self._yielding = True
+            self._yield_until = now + self._hold_seconds
             self._emit(True)
-        elif self._yielding:
+        elif self._yielding and now >= self._yield_until:
             self._yielding = False
-            logger.info("Consent dialog closed; input suppression restored")
+            logger.info(
+                "Consent dialog gone and the release window elapsed; "
+                "input suppression restored"
+            )
             self._emit(False)
         return present
 

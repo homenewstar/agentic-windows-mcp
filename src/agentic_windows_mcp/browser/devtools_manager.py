@@ -603,10 +603,7 @@ class BrowserDevToolsManager:
         if selector:
             element = await page.wait_for_selector(selector, state="attached", timeout=5000)
             if not element:
-                raise ValueError(
-                f"Element not found for selector: {selector} "
-                f"[diag: {'; '.join(getattr(self, '_last_resolve_diag', []))}]"
-            )
+                raise ValueError(f"Element not found for selector: {selector}")
             raw_html = await element.inner_html()
         else:
             raw_html = await page.content()
@@ -1566,7 +1563,10 @@ class BrowserDevToolsManager:
         session, _tracker = await self._get_cdp(page)
         node_id = await self._resolve_node_id(session, selector)
         if not node_id:
-            raise ValueError(f"Element not found for selector: {selector}")
+            raise ValueError(
+                f"Element not found for selector: {selector} "
+                f"[diag: {'; '.join(getattr(self, '_last_resolve_diag', []))}]"
+            )
         matched = await session.send(
             "CSS.getMatchedStylesForNode", {"nodeId": node_id}
         )

@@ -162,6 +162,82 @@
     {
       "name": "Registry",
       "description": "Accesses the Windows Registry. Use mode=\"get\" to read a value, mode=\"set\" to create/update a value, mode=\"delete\" to remove a value or key, mode=\"list\" to list values and sub-keys under a path."
+    },
+    {
+      "name": "Browser_Connect",
+      "description": "Connect directly to the user's running browser (Chrome, Edge, Brave) via DevTools CDP WebSocket."
+    },
+    {
+      "name": "Browser_EvaluateScript",
+      "description": "Execute arbitrary JavaScript directly in the browser's context. Supports targeting a specific page_id."
+    },
+    {
+      "name": "Browser_GetAccessibilityTree",
+      "description": "Read the page's full accessibility tree via CDP Accessibility.getFullAXTree (roles, accessible names, values and state properties), like the DevTools Accessibility panel."
+    },
+    {
+      "name": "Browser_GetComputedStyle",
+      "description": "Advanced computed styles extraction: captures element styles, ::before and ::after pseudo-elements, CSS animations/transitions, and generates a ready-to-use clean CSS snippet for cloning or frontend debugging."
+    },
+    {
+      "name": "Browser_GetCssStyles",
+      "description": "Dissect CSS styles and box-model layout of elements matching a CSS selector."
+    },
+    {
+      "name": "Browser_GetMatchedStyles",
+      "description": "Read the Elements panel's matched CSS rules for an element via CDP CSS.getMatchedStylesForNode: inline style, every matching stylesheet rule with its selector, origin and winning properties, inherited rules, and ::before/::after pseudo-element rules."
+    },
+    {
+      "name": "Browser_GetNetworkDetails",
+      "description": "Retrieve deep details for one network request (by Playwright request ID, CDP request ID, or URL substring) from raw CDP data: request/response headers, request payload (post data), per-phase timing, transfer size, redirect chain, initiator, failure reason, WebSocket frames, and the response body (truncated to max_body_chars)."
+    },
+    {
+      "name": "Browser_GetPageSnapshot",
+      "description": "Extract and dissect the page's HTML structure or text content on the active tab or specific page_id."
+    },
+    {
+      "name": "Browser_GetSourceText",
+      "description": "Fetch the full source text of a script (kind='script', Debugger.getScriptSource) or stylesheet (kind='stylesheet', CSS.getStyleSheetText) by the ID returned from Browser_ListPageSources."
+    },
+    {
+      "name": "Browser_GetStorage",
+      "description": "Read the page's Application-panel storage via CDP/Playwright: cookies for the page's domain (including HttpOnly), localStorage, sessionStorage, IndexedDB databases/stores with sampled records, Cache Storage entries, and Service Worker registrations. Choose subsets with 'types'."
+    },
+    {
+      "name": "Browser_Highlight",
+      "description": "Visually highlight an element on the user's screen with a vibrant red outline and box-shadow for real-time visual debugging."
+    },
+    {
+      "name": "Browser_Interact",
+      "description": "Interact with web elements for automated UI testing. Supported actions: 'click', 'right_click' (opens context menu), 'double_click' (select text/detail), 'hover', 'hover_and_wait' (shows tooltips), 'fill', 'press_key', 'wait_for', 'drag' (hold the left button and move: from a selector's center or start_x/start_y, either straight to target_x/target_y or through 'waypoints' [[x, y], ...] for multi-segment paths like swipes and scratching; hold_ms presses in place before moving, step_delay_ms paces the movement), 'hold' (press and hold the left button at a selector or start_x/start_y for hold_ms, then release). Supports target page_id."
+    },
+    {
+      "name": "Browser_ListConsoleMessages",
+      "description": "Inspect browser console logs (log, info, warn, error, uncaught page exceptions) for debugging frontend code."
+    },
+    {
+      "name": "Browser_ListNetworkRequests",
+      "description": "Inspect intercepted HTTP/API network requests (method, url, status, duration, resource type) for debugging frontend APIs."
+    },
+    {
+      "name": "Browser_ListPageSources",
+      "description": "List the page's Sources-panel resources captured by CDP: JavaScript scripts (Debugger.scriptParsed) and stylesheets (CSS.styleSheetAdded) with their IDs, URLs and sizes. Use the IDs with Browser_GetSourceText. Only resources parsed since the CDP session attached are listed."
+    },
+    {
+      "name": "Browser_ManageTabs",
+      "description": "Manage browser tabs/pages (action: 'list', 'new', 'select', 'close')."
+    },
+    {
+      "name": "Browser_Navigate",
+      "description": "Navigate a browser tab to a URL with configurable wait condition (load, domcontentloaded, networkidle). Can target a specific page_id."
+    },
+    {
+      "name": "Browser_QueryElements",
+      "description": "Query elements matching a CSS selector, returning tag names, inner text, attributes (href, src, class, id), and bounding boxes."
+    },
+    {
+      "name": "Browser_TakeScreenshot",
+      "description": "Capture a screenshot of the active web page, viewport, or specific element selector. Supports target page_id."
     }
   ],
   "compatibility": {

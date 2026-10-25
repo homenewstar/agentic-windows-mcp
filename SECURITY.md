@@ -318,4 +318,4 @@ Users are solely responsible for:
 
 ## License
 
-This security policy is part of the Agentic Agentic Windows MCP project, licensed under the MIT License. See [LICENSE](LICENSE.md) for details.
+This security policy is part of the Agentic Agentic Windows MCP project, licensed under the Apache License 2.0. See [LICENSE](LICENSE.md) for details.

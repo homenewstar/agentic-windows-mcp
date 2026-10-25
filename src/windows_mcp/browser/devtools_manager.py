@@ -219,19 +219,13 @@ class BrowserDevToolsManager:
             )
             self.connected_endpoint = endpoint
         except Exception as e:
-            browser_exe = find_system_browser_executable()
-            if browser_exe:
-                logger.info("Attempting to launch user browser %s with remote-debugging-port=9222", browser_exe)
-                subprocess.Popen([browser_exe, "--remote-debugging-port=9222", "--restore-last-session"])
-                await asyncio.sleep(1.5)
-                new_endpoint = resolve_user_browser_endpoint()
-                self.browser = await self.playwright.chromium.connect_over_cdp(new_endpoint)
-                self.connected_endpoint = new_endpoint
-            else:
-                raise RuntimeError(
-                    f"Could not connect to user's running browser ({e}). "
-                    f"Please launch your browser with remote debugging enabled: chrome.exe --remote-debugging-port=9222"
-                ) from e
+            # Owner's rule: never launch a browser -- only attach to the
+            # one the user already has open. Report and stop instead.
+            raise RuntimeError(
+                f"Could not connect to the user's already-open browser ({e}). "
+                f"Remote debugging must be enabled in that browser instance "
+                f"(chrome://inspect/#remote-debugging); no browser was launched."
+            ) from e
 
         contexts = self.browser.contexts
         if contexts:

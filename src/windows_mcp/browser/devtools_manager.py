@@ -18,6 +18,8 @@ from playwright.async_api import (
     async_playwright,
 )
 
+from windows_mcp.browser.consent import ConsentWatcher, auto_allow_enabled, try_allow_once
+
 logger = logging.getLogger(__name__)
 
 MAX_BUFFER_SIZE = 500
@@ -92,6 +94,15 @@ class BrowserDevToolsManager:
         self._worker_thread: Optional[threading.Thread] = None
         self._ready_event = threading.Event()
         self._start_worker_thread()
+
+        # Break the remote-debugging consent deadlock: while Chrome shows
+        # its "Allow remote debugging?" dialog every CDP call stalls, and
+        # the control lease keeps the user from clicking it away. The
+        # watcher approves exactly that dialog from inside this process.
+        self._consent_watcher: Optional[ConsentWatcher] = None
+        if auto_allow_enabled():
+            self._consent_watcher = ConsentWatcher()
+            self._consent_watcher.start()
 
     def _start_worker_thread(self) -> None:
         def runner() -> None:
@@ -209,19 +220,35 @@ class BrowserDevToolsManager:
             )
             self.connected_endpoint = endpoint
         except Exception as e:
-            browser_exe = find_system_browser_executable()
-            if browser_exe:
-                logger.info("Attempting to launch user browser %s with remote-debugging-port=9222", browser_exe)
-                subprocess.Popen([browser_exe, "--remote-debugging-port=9222", "--restore-last-session"])
-                await asyncio.sleep(1.5)
-                new_endpoint = resolve_user_browser_endpoint()
-                self.browser = await self.playwright.chromium.connect_over_cdp(new_endpoint)
-                self.connected_endpoint = new_endpoint
-            else:
-                raise RuntimeError(
-                    f"Could not connect to user's running browser ({e}). "
-                    f"Please launch your browser with remote debugging enabled: chrome.exe --remote-debugging-port=9222"
-                ) from e
+            # A pending remote-debugging consent dialog stalls the attach
+            # itself; approve it (when enabled) and retry once before
+            # falling back to launching a fresh browser.
+            recovered = False
+            if auto_allow_enabled():
+                try:
+                    if try_allow_once():
+                        self.browser = await asyncio.wait_for(
+                            self.playwright.chromium.connect_over_cdp(endpoint),
+                            timeout=4.0,
+                        )
+                        self.connected_endpoint = endpoint
+                        recovered = True
+                except Exception:
+                    recovered = False
+            if not recovered:
+                browser_exe = find_system_browser_executable()
+                if browser_exe:
+                    logger.info("Attempting to launch user browser %s with remote-debugging-port=9222", browser_exe)
+                    subprocess.Popen([browser_exe, "--remote-debugging-port=9222", "--restore-last-session"])
+                    await asyncio.sleep(1.5)
+                    new_endpoint = resolve_user_browser_endpoint()
+                    self.browser = await self.playwright.chromium.connect_over_cdp(new_endpoint)
+                    self.connected_endpoint = new_endpoint
+                else:
+                    raise RuntimeError(
+                        f"Could not connect to user's running browser ({e}). "
+                        f"Please launch your browser with remote debugging enabled: chrome.exe --remote-debugging-port=9222"
+                    ) from e
 
         contexts = self.browser.contexts
         if contexts:

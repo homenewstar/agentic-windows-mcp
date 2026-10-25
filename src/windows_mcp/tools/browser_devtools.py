@@ -320,7 +320,11 @@ def register(mcp, *, get_desktop, get_analytics):
 
     @mcp.tool(
         name="Browser_GetNetworkDetails",
-        description="Retrieve detailed request and response headers, timing, and status for a specific network request URL or ID.",
+        description=(
+            "Retrieve deep details for one network request (by Playwright request ID, CDP request ID, or URL substring) "
+            "from raw CDP data: request/response headers, request payload (post data), per-phase timing, transfer size, "
+            "redirect chain, initiator, failure reason, WebSocket frames, and the response body (truncated to max_body_chars)."
+        ),
         annotations=ToolAnnotations(
             title="Browser Get Network Details",
             readOnlyHint=True,
@@ -329,8 +333,18 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
-    async def browser_get_network_details(request_id_or_url: str) -> str:
-        res = manager.get_network_details(request_id_or_url)
+    async def browser_get_network_details(
+        request_id_or_url: str,
+        include_body: bool = True,
+        max_body_chars: int = 20000,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.get_network_details_deep(
+            request_id_or_url=request_id_or_url,
+            include_body=include_body,
+            max_body_chars=max_body_chars,
+            page_id=page_id,
+        )
         return json.dumps(res or {"error": "Request not found"}, indent=2, ensure_ascii=False)
 
     @mcp.tool(
@@ -382,4 +396,116 @@ def register(mcp, *, get_desktop, get_analytics):
         else:
             raise ValueError(f"Unknown action: {action}. Supported: list, new, select, close")
 
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_GetStorage",
+        description=(
+            "Read the page's Application-panel storage via CDP/Playwright: cookies for the page's domain "
+            "(including HttpOnly), localStorage, sessionStorage, IndexedDB databases/stores with sampled records, "
+            "Cache Storage entries, and Service Worker registrations. Choose subsets with 'types'."
+        ),
+        annotations=ToolAnnotations(
+            title="Browser Get Storage",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_get_storage(
+        types: Optional[List[str]] = None,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.get_storage(types=types, page_id=page_id)
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_GetMatchedStyles",
+        description=(
+            "Read the Elements panel's matched CSS rules for an element via CDP CSS.getMatchedStylesForNode: "
+            "inline style, every matching stylesheet rule with its selector, origin and winning properties, "
+            "inherited rules, and ::before/::after pseudo-element rules."
+        ),
+        annotations=ToolAnnotations(
+            title="Browser Get Matched Styles",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_get_matched_styles(
+        selector: str,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.get_matched_styles(selector=selector, page_id=page_id)
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_GetAccessibilityTree",
+        description=(
+            "Read the page's full accessibility tree via CDP Accessibility.getFullAXTree "
+            "(roles, accessible names, values and state properties), like the DevTools Accessibility panel."
+        ),
+        annotations=ToolAnnotations(
+            title="Browser Get Accessibility Tree",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_get_accessibility_tree(
+        max_depth: int = 30,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.get_accessibility_tree(max_depth=max_depth, page_id=page_id)
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_ListPageSources",
+        description=(
+            "List the page's Sources-panel resources captured by CDP: JavaScript scripts (Debugger.scriptParsed) "
+            "and stylesheets (CSS.styleSheetAdded) with their IDs, URLs and sizes. Use the IDs with Browser_GetSourceText. "
+            "Only resources parsed since the CDP session attached are listed."
+        ),
+        annotations=ToolAnnotations(
+            title="Browser List Page Sources",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_list_page_sources(
+        filter_text: Optional[str] = None,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.list_page_sources(filter_text=filter_text, page_id=page_id)
+        return json.dumps(res, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        name="Browser_GetSourceText",
+        description=(
+            "Fetch the full source text of a script (kind='script', Debugger.getScriptSource) or stylesheet "
+            "(kind='stylesheet', CSS.getStyleSheetText) by the ID returned from Browser_ListPageSources."
+        ),
+        annotations=ToolAnnotations(
+            title="Browser Get Source Text",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def browser_get_source_text(
+        source_id: str,
+        kind: str = "script",
+        max_chars: int = 50000,
+        page_id: Optional[int] = None,
+    ) -> str:
+        res = await manager.get_source_text(
+            source_id=source_id, kind=kind, max_chars=max_chars, page_id=page_id
+        )
         return json.dumps(res, indent=2, ensure_ascii=False)

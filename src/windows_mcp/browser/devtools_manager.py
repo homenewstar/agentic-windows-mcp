@@ -414,6 +414,7 @@ class BrowserDevToolsManager:
             "CSS.enable",
             "DOM.enable",
             "Accessibility.enable",
+            "Runtime.enable",
         ):
             try:
                 await session.send(method)
@@ -1439,27 +1440,53 @@ class BrowserDevToolsManager:
             }
         return result
 
+    async def _resolve_node_id(self, session: Any, selector: str) -> int:
+        """Resolve a CSS selector to a CDP backend nodeId (0 when absent).
+
+        Primary path: Runtime.evaluate + DOM.requestNode. Fallback: a full
+        DOM.getDocument snapshot + DOM.querySelector, for sessions where
+        Runtime evaluation is unavailable.
+        """
+        try:
+            evaluated = await session.send(
+                "Runtime.evaluate",
+                {
+                    "expression": f"document.querySelector({_json.dumps(selector)})",
+                    "returnByValue": False,
+                },
+            )
+            remote = evaluated.get("result", {})
+            object_id = remote.get("objectId")
+            if object_id and remote.get("subtype") != "null":
+                node = await session.send("DOM.requestNode", {"objectId": object_id})
+                node_id = node.get("nodeId", 0)
+                if node_id:
+                    return node_id
+            logger.debug(
+                "Runtime node resolution missed for %s: %s",
+                selector,
+                str(evaluated)[:300],
+            )
+        except Exception as exc:
+            logger.debug("Runtime node resolution failed for %s: %s", selector, exc)
+        try:
+            document = await session.send("DOM.getDocument", {"depth": -1, "pierce": True})
+            root_id = document.get("root", {}).get("nodeId", 0)
+            if root_id:
+                found = await session.send(
+                    "DOM.querySelector", {"nodeId": root_id, "selector": selector}
+                )
+                return found.get("nodeId", 0)
+        except Exception as exc:
+            logger.debug("DOM node resolution failed for %s: %s", selector, exc)
+        return 0
+
     async def _get_matched_styles_internal(
         self, selector: str, page_id: Optional[int] = None
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         session, _tracker = await self._get_cdp(page)
-        # Resolve the element through Runtime + DOM.requestNode: querying
-        # from a shallow DOM.getDocument snapshot misses nodes the DOM
-        # agent has not been told about yet.
-        evaluated = await session.send(
-            "Runtime.evaluate",
-            {
-                "expression": f"document.querySelector({_json.dumps(selector)})",
-                "returnByValue": False,
-            },
-        )
-        remote = evaluated.get("result", {})
-        object_id = remote.get("objectId")
-        if not object_id or remote.get("subtype") == "null":
-            raise ValueError(f"Element not found for selector: {selector}")
-        node = await session.send("DOM.requestNode", {"objectId": object_id})
-        node_id = node.get("nodeId", 0)
+        node_id = await self._resolve_node_id(session, selector)
         if not node_id:
             raise ValueError(f"Element not found for selector: {selector}")
         matched = await session.send(

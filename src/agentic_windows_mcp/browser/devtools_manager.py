@@ -603,7 +603,10 @@ class BrowserDevToolsManager:
         if selector:
             element = await page.wait_for_selector(selector, state="attached", timeout=5000)
             if not element:
-                raise ValueError(f"Element not found for selector: {selector}")
+                raise ValueError(
+                f"Element not found for selector: {selector} "
+                f"[diag: {'; '.join(getattr(self, '_last_resolve_diag', []))}]"
+            )
             raw_html = await element.inner_html()
         else:
             raw_html = await page.content()
@@ -1443,10 +1446,78 @@ class BrowserDevToolsManager:
     async def _resolve_node_id(self, session: Any, selector: str) -> int:
         """Resolve a CSS selector to a CDP backend nodeId (0 when absent).
 
-        Primary path: Runtime.evaluate + DOM.requestNode. Fallback: a full
-        DOM.getDocument snapshot + DOM.querySelector, for sessions where
-        Runtime evaluation is unavailable.
+        Three independent strategies, in order:
+        1. Tag the element with a marker attribute via Runtime.evaluate,
+           then walk the DOM.getDocument tree in Python to find that node.
+        2. Runtime.evaluate + DOM.requestNode.
+        3. DOM.getDocument + DOM.querySelector.
+        Diagnostics from every failed strategy are kept on
+        ``self._last_resolve_diag`` so callers can surface the real cause.
         """
+        diag: List[str] = []
+        self._last_resolve_diag = diag
+
+        # Strategy 1: marker attribute + document-tree walk.
+        try:
+            marked = await session.send(
+                "Runtime.evaluate",
+                {
+                    "expression": (
+                        "(() => { const el = document.querySelector("
+                        + _json.dumps(selector)
+                        + "); if (!el) return false;"
+                        " el.setAttribute('data-agentic-target', '1'); return true; })()"
+                    ),
+                    "returnByValue": True,
+                },
+            )
+            mark_value = (marked.get("result") or {}).get("value")
+            diag.append(f"mark={mark_value!r} exc={'exceptionDetails' in marked}")
+            if mark_value is True:
+                document = await session.send(
+                    "DOM.getDocument", {"depth": -1, "pierce": True}
+                )
+                found_id = 0
+
+                def walk(node: Dict[str, Any]) -> None:
+                    nonlocal found_id
+                    if found_id:
+                        return
+                    attrs = node.get("attributes") or []
+                    for i in range(0, len(attrs) - 1, 2):
+                        if attrs[i] == "data-agentic-target" and attrs[i + 1] == "1":
+                            found_id = node.get("nodeId", 0)
+                            return
+                    for child in node.get("children") or []:
+                        walk(child)
+                    for child in node.get("shadowRoots") or []:
+                        walk(child)
+                    content = node.get("contentDocument")
+                    if content:
+                        walk(content)
+
+                walk(document.get("root") or {})
+                diag.append(f"tree_walk found={found_id}")
+                try:
+                    await session.send(
+                        "Runtime.evaluate",
+                        {
+                            "expression": (
+                                "(() => { const el = document.querySelector("
+                                "'[data-agentic-target=\"1\"]');"
+                                " if (el) el.removeAttribute('data-agentic-target'); })()"
+                            ),
+                            "returnByValue": True,
+                        },
+                    )
+                except Exception:
+                    pass
+                if found_id:
+                    return found_id
+        except Exception as exc:
+            diag.append(f"strategy1 error: {exc}")
+
+        # Strategy 2: Runtime object -> DOM.requestNode.
         try:
             evaluated = await session.send(
                 "Runtime.evaluate",
@@ -1457,28 +1528,35 @@ class BrowserDevToolsManager:
             )
             remote = evaluated.get("result", {})
             object_id = remote.get("objectId")
+            diag.append(
+                f"eval subtype={remote.get('subtype')!r} objectId={'yes' if object_id else 'no'}"
+                f" exc={'exceptionDetails' in evaluated}"
+            )
             if object_id and remote.get("subtype") != "null":
                 node = await session.send("DOM.requestNode", {"objectId": object_id})
                 node_id = node.get("nodeId", 0)
+                diag.append(f"requestNode={node_id}")
                 if node_id:
                     return node_id
-            logger.debug(
-                "Runtime node resolution missed for %s: %s",
-                selector,
-                str(evaluated)[:300],
-            )
         except Exception as exc:
-            logger.debug("Runtime node resolution failed for %s: %s", selector, exc)
+            diag.append(f"strategy2 error: {exc}")
+
+        # Strategy 3: DOM.querySelector from the document root.
         try:
             document = await session.send("DOM.getDocument", {"depth": -1, "pierce": True})
-            root_id = document.get("root", {}).get("nodeId", 0)
+            root = document.get("root", {})
+            root_id = root.get("nodeId", 0)
+            diag.append(f"doc root={root_id} name={root.get('nodeName')!r}")
             if root_id:
                 found = await session.send(
                     "DOM.querySelector", {"nodeId": root_id, "selector": selector}
                 )
-                return found.get("nodeId", 0)
+                node_id = found.get("nodeId", 0)
+                diag.append(f"querySelector={node_id}")
+                if node_id:
+                    return node_id
         except Exception as exc:
-            logger.debug("DOM node resolution failed for %s: %s", selector, exc)
+            diag.append(f"strategy3 error: {exc}")
         return 0
 
     async def _get_matched_styles_internal(

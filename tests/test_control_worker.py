@@ -176,7 +176,7 @@ def test_recovery_cannot_clear_new_fault_or_stop(monkeypatch, interruption):
 
         def interrupt_state(state):
             changed = change_state(state)
-            if state == "user":
+            if state == "ready":  # Agent-priority: recovery lands on "ready".
                 owner._fail_open()
             return changed
 
@@ -195,7 +195,7 @@ def test_successful_recovery_requires_current_completed_installation():
     owner._rehook_completed = fault
     owner._recover_after_rehook(fault, healthy=True, sampled_at=control.time.monotonic())
     assert not owner._emergency
-    assert owner._state == "user"
+    assert owner._state == "ready"
     assert not owner._suppress
 
 
@@ -296,7 +296,7 @@ def test_health_expiring_during_recovery_keeps_input_blocked(monkeypatch, delay_
 
         def slow_state(state):
             changed = set_state(state)
-            if state == "user":
+            if state == "ready":  # Agent-priority: recovery lands on "ready".
                 clock[0] += 0.25
             return changed
 

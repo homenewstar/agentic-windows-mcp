@@ -23,7 +23,11 @@ def refresh_deadline(owner: Any, now: float, fault=None) -> None:
     try:
         if current() and owner._state == "ai" and owner._visual_armed and not owner._fast_takeover:
             owner._deadline = now + 1.0
-            owner._suppress = True
+            # A dialog yield (consent dialog on screen) wins over the
+            # heartbeat: keep suppression OFF so the user can answer the
+            # dialog. Without this, the yield was overridden within
+            # ~0.25s and the user stayed locked out.
+            owner._suppress = not owner._dialog_yield
             if not current():
                 owner._suppress = False
                 owner._deadline = 0.0

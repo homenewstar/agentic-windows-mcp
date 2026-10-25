@@ -20,6 +20,11 @@ BROWSER_TOOLS = frozenset(
         "Browser_GetNetworkDetails",
         "Browser_ListConsoleMessages",
         "Browser_ManageTabs",
+        "Browser_GetStorage",
+        "Browser_GetMatchedStyles",
+        "Browser_GetAccessibilityTree",
+        "Browser_ListPageSources",
+        "Browser_GetSourceText",
     }
 )
 

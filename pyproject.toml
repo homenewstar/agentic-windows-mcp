@@ -1,6 +1,6 @@
 [project]
 name = "agentic-windows-mcp"
-version = "0.8.10"
+version = "0.8.11"
 description = "Agentic Windows MCP - an MCP server that gives AI agents full, safe control of a Windows PC: desktop automation, remote computer control, browser DevTools inspection, and remote software development."
 authors = [
     { name = "Vu Manh Ruy" }
@@ -8,12 +8,14 @@ authors = [
 readme = "README.md"
 license = { file = "LICENSE.md" }
 keywords = ["windows", "mcp", "ai", "desktop", "ai agent"]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: Microsoft :: Windows :: Windows 10",
     "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Desktop Environment",
     "Topic :: System :: Shells",

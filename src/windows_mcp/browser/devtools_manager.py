@@ -18,7 +18,11 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from windows_mcp.browser.consent import ConsentDialogMonitor
+from windows_mcp.browser.consent import (
+    ConsentDialogMonitor,
+    detect_consent_dialog,
+    should_retry_attach,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,23 +216,51 @@ class BrowserDevToolsManager:
             raise RuntimeError("No user browser DevTools endpoint found.")
 
         logger.info("Connecting to user browser at %s", endpoint)
-        try:
-            # 30s (not 4s): when Chrome shows its remote-debugging consent
-            # dialog, the handshake stalls until the user clicks Allow --
-            # give them the full dialog-yield window to answer it.
-            self.browser = await asyncio.wait_for(
-                self.playwright.chromium.connect_over_cdp(endpoint),
-                timeout=30.0,
-            )
-            self.connected_endpoint = endpoint
-        except Exception as e:
+        # While Chrome's remote-debugging consent dialog is on screen the
+        # handshake stalls until the user clicks Allow (the dialog monitor
+        # releases the input for them, held 10s per sighting). Retry up to
+        # 3 attempts while the dialog explains the stall; if the user
+        # still has not approved, surface CONSENT_PENDING so the agent can
+        # ask them in chat and wait for their confirmation there.
+        saw_dialog = False
+        last_error: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                self.browser = await asyncio.wait_for(
+                    self.playwright.chromium.connect_over_cdp(endpoint),
+                    timeout=30.0,
+                )
+                self.connected_endpoint = endpoint
+                last_error = None
+                break
+            except Exception as e:
+                last_error = e
+                await asyncio.sleep(2)
+                present = detect_consent_dialog()
+                saw_dialog = saw_dialog or present
+                if not should_retry_attach(attempt, 3, present):
+                    break
+                logger.info(
+                    "Consent dialog is up (attach attempt %d/3); "
+                    "waiting for the user to approve it",
+                    attempt,
+                )
+                await asyncio.sleep(3)
+        if last_error is not None:
+            if saw_dialog:
+                raise RuntimeError(
+                    "CONSENT_PENDING: Chrome's remote-debugging consent "
+                    "dialog is on screen and the user has not approved it "
+                    "after 3 attach attempts. Ask the user to click "
+                    "'Allow' on the dialog, then retry."
+                ) from last_error
             # Owner's rule: never launch a browser -- only attach to the
             # one the user already has open. Report and stop instead.
             raise RuntimeError(
-                f"Could not connect to the user's already-open browser ({e}). "
+                f"Could not connect to the user's already-open browser ({last_error}). "
                 f"Remote debugging must be enabled in that browser instance "
                 f"(chrome://inspect/#remote-debugging); no browser was launched."
-            ) from e
+            ) from last_error
 
         contexts = self.browser.contexts
         if contexts:

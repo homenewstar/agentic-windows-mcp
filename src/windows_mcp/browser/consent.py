@@ -51,6 +51,7 @@ NameEntry = Tuple[str, str]
 YieldHandler = Callable[[bool], None]
 
 _yield_handler: Optional[YieldHandler] = None
+_active_monitor: Optional["ConsentDialogMonitor"] = None
 
 
 def set_yield_handler(handler: Optional[YieldHandler]) -> None:
@@ -197,8 +198,11 @@ class ConsentDialogMonitor:
         self._thread: Optional[threading.Thread] = None
         self._yielding = False
         self._yield_until = 0.0
+        self._last_present = False
+        self._last_poll_at = 0.0
 
     def start(self) -> None:
+        global _active_monitor
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
@@ -206,6 +210,7 @@ class ConsentDialogMonitor:
             target=self._run, name="BrowserConsentMonitor", daemon=True
         )
         self._thread.start()
+        _active_monitor = self
 
     def stop(self) -> None:
         self._stop.set()
@@ -225,6 +230,8 @@ class ConsentDialogMonitor:
         """One detection pass; returns whether the dialog is present."""
         present = bool(self._detector())
         now = self._clock()
+        self._last_present = present
+        self._last_poll_at = now
         if present:
             if not self._yielding:
                 logger.info(
@@ -249,3 +256,34 @@ class ConsentDialogMonitor:
                 self.poll_once()
             except Exception:
                 logger.debug("Consent monitor pass failed", exc_info=True)
+
+
+def consent_state() -> dict:
+    """Latest known consent-dialog state, for callers outside the monitor.
+
+    Lets the agent (through tool results) KNOW the dialog is on screen
+    waiting for the user, instead of guessing from a stalled call.
+    """
+    monitor = _active_monitor
+    if monitor is not None:
+        return {
+            "dialog_present": bool(monitor._last_present),
+            "yielding_input": bool(monitor._yielding),
+            "seconds_since_poll": max(
+                0.0, time.monotonic() - monitor._last_poll_at
+            )
+            if monitor._last_poll_at
+            else None,
+            "source": "monitor",
+        }
+    return {
+        "dialog_present": detect_consent_dialog(),
+        "yielding_input": False,
+        "seconds_since_poll": 0.0,
+        "source": "direct-scan",
+    }
+
+
+def should_retry_attach(attempt: int, max_attempts: int, dialog_present: bool) -> bool:
+    """Retry a CDP attach only while the consent dialog explains the stall."""
+    return dialog_present and attempt < max_attempts

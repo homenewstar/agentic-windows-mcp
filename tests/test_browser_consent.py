@@ -127,3 +127,23 @@ def test_monitor_without_handler_is_quiet(monkeypatch: pytest.MonkeyPatch):
     assert monitor.poll_once() is True
     clock.now = 100.0
     assert monitor.poll_once() is False
+
+
+def test_should_retry_attach_only_while_dialog_present():
+    assert consent.should_retry_attach(1, 3, True) is True
+    assert consent.should_retry_attach(2, 3, True) is True
+    # After the 3rd attempt the agent must surface CONSENT_PENDING instead.
+    assert consent.should_retry_attach(3, 3, True) is False
+    # No dialog: a failure is a real failure, not a wait-for-user.
+    assert consent.should_retry_attach(1, 3, False) is False
+
+
+def test_consent_state_reports_monitor(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(consent, "_yield_handler", None)
+    monitor = consent.ConsentDialogMonitor(detector=_Script([True]))
+    monitor.poll_once()
+    monkeypatch.setattr(consent, "_active_monitor", monitor)
+    state = consent.consent_state()
+    assert state["dialog_present"] is True
+    assert state["yielding_input"] is True
+    assert state["source"] == "monitor"

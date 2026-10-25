@@ -28,12 +28,33 @@ def test_configured_idle_boundary(monkeypatch, state, timeout):
     owner.idle_timeout_seconds = timeout
     owner._state = state
     owner._last_user = owner._last_physical_event = 100.0
+    if state == "ai":
+        # Keep the lease live so only the physical-recency rule is exercised.
+        owner._active_calls = 1
+        owner._lease_until = 100.0 + timeout + 60.0
     now[0] = 100.0 + timeout - 0.01
-    assert owner.status()["state"] == "user"
-    assert owner.status()["wait_seconds"] == pytest.approx(0.01)
-    with pytest.raises(control.ControlBlocked):
-        owner.begin_call("PowerShell")
+    if state == "user":
+        # Only a chord takeover enters "user"; it holds until the idle edge.
+        assert owner.status()["state"] == "user"
+        assert owner.status()["wait_seconds"] == pytest.approx(0.01)
+        with pytest.raises(control.ControlBlocked):
+            owner.begin_call("PowerShell")
+    else:
+        # Agent-priority: recent physical input never turns ready/ai into a
+        # "user" wait, and never blocks an agent call from ready.
+        assert owner.status()["state"] == state
+        assert owner.status()["wait_seconds"] == 0.0
+        if state == "ready":
+            token = owner.begin_call("PowerShell")
+            owner.checkpoint(token)
+            owner.end_call(token)
+            with owner._lock:
+                owner._set_locked("ready")
+            owner._lease_until = 0.0
     now[0] = 100.0 + timeout
+    if state == "ai":
+        owner._active_calls = 0
+        owner._lease_until = 0.0
     assert owner.status()["state"] == "ready"
     token = owner.begin_call("PowerShell")
     owner.checkpoint(token)
@@ -53,8 +74,8 @@ def test_configured_wait_does_not_override_held_input(monkeypatch, held):
     assert owner.status()["state"] == "ready"
 
 
-@pytest.mark.parametrize("elapsed,expected", [(2, "user"), (4, "ready")])
-def test_start_uses_configured_wait(monkeypatch, elapsed, expected):
+@pytest.mark.parametrize("elapsed,expected", [(2, "ready"), (4, "ready")])
+def test_start_ignores_configured_wait_after_physical_input(monkeypatch, elapsed, expected):
     owner = control.ControlCoordinator()
     owner.idle_timeout_seconds = 3
     owner._last_physical_event = 100.0 - elapsed

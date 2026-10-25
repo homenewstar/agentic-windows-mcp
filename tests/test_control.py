@@ -239,8 +239,10 @@ def test_user_idle_waits_until_held_mouse_is_released(monkeypatch):
     owner._mouse_down.add(1)
     clock[0] = 111.0
     assert owner.status()["state"] == "user"
-    owner._mouse_down.clear()
+    # The move arrives while the button is still held (the held button blocks
+    # the idle tick), so its bookkeeping extends the takeover past release.
     owner._handle(("point", 10, 10, 0x202))
+    owner._mouse_down.clear()
     clock[0] = 120.999
     assert owner.status()["state"] == "user"
     clock[0] = 121.0

@@ -526,9 +526,11 @@ class ControlCoordinator:
             else:
                 changed = self._tick_locked(now)
                 kind = event[0]
-                # AGENT-PRIORITY PATCH (2026-10-25): physical input never
-                # preempts an AI lease and never parks the coordinator in
-                # "user". Events below only update activity bookkeeping.
+                # AGENT-PRIORITY PATCH v2 (2026-10-25): ordinary physical
+                # input (keys, clicks, mouse travel) never preempts an AI
+                # lease and never parks the coordinator in "user". The ONLY
+                # user takeover is the Ctrl+Alt+Shift+Backspace chord, which
+                # arrives here as a "hotkey" event and is honored below.
                 if (
                     kind in ("key", "point", "raw")
                     and self._state == "ai"
@@ -540,11 +542,16 @@ class ControlCoordinator:
                 # takeover is consumed. Always acknowledge its fast-path flag.
                 if kind == "hotkey":
                     self._last_user = now
+                    # AGENT-PRIORITY PATCH v2: sole takeover path — the chord
+                    # hands control back to the user (state "user" until the
+                    # usual idle timeout returns it to "ready").
+                    changed = self._set_locked("user") or changed
                     self._fast_takeover = False
                 elif kind in ("key", "point", "raw") and self._state in ("ready", "user"):
+                    # Bookkeeping only: "ready" stays ready (agent unblocked),
+                    # "user" stays user (a chord takeover lasts until the
+                    # idle tick in _tick_locked returns it to "ready").
                     self._last_user = now
-                    if self._state == "user":
-                        changed = self._set_locked("ready") or changed
                 elif kind == "raw" and self._state == "ai":
                     device, dx, dy = event[1:4]
                     stamp = event[4] if len(event) > 4 else now

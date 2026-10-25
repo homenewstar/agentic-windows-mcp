@@ -1700,7 +1700,7 @@ class BrowserDevToolsManager:
         self, filter_text: Optional[str] = None, page_id: Optional[int] = None
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
-        _session, tracker = await self._get_cdp(page)
+        session, tracker = await self._get_cdp(page)
         await self._ensure_domains(session, "Debugger.enable", "CSS.enable")
         scripts = list(tracker.scripts.values())
         stylesheets = list(tracker.stylesheets.values())

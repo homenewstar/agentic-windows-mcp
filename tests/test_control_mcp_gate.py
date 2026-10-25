@@ -60,6 +60,9 @@ class FakeController:
         if self.state != "ai":
             raise ControlBlocked("CONTROL_PREEMPTED", self.status())
 
+    def set_dialog_yield(self, active):
+        pass
+
 
 @pytest.mark.asyncio
 async def test_gate_blocks_dynamic_tools_but_status_remains_available():

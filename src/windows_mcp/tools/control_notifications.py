@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -14,6 +15,22 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 logger = logging.getLogger(__name__)
+
+
+def tool_timeout_seconds() -> float:
+    """Per-call deadline for tools serialized behind the control gate.
+
+    One hung call (a browser evaluate against a renderer blocked by a native
+    dialog, a subprocess whose output pipe is held by a long-lived child)
+    otherwise holds the gate lock forever and wedges every later call until
+    the server is restarted. Bounded by WINDOWS_MCP_TOOL_TIMEOUT_SECONDS;
+    a value <= 0 disables the deadline.
+    """
+    raw = os.getenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "180").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 180.0
 
 
 @dataclass
@@ -201,6 +218,35 @@ class ControlToolGate(Middleware):
                     self.controller.end_call(token)
             raise
 
+    async def _call_with_deadline(
+        self, context: MiddlewareContext, call_next: Callable
+    ) -> Any:
+        """Run a gated call under the per-call deadline.
+
+        On timeout the await is cancelled, which makes the caller's finally
+        release the lease and the gate lock; a synchronous worker may keep
+        running in the background, but the request-closed marker set by that
+        finally blocks its next desktop input step, and later calls proceed.
+        """
+        timeout = tool_timeout_seconds()
+        if timeout <= 0:
+            return await call_next(context)
+        try:
+            return await asyncio.wait_for(call_next(context), timeout=timeout)
+        except asyncio.TimeoutError:
+            name = context.message.name
+            logger.error(
+                "Tool %s exceeded the %.0fs deadline; releasing the control gate",
+                name,
+                timeout,
+            )
+            raise ToolError(
+                json.dumps(
+                    {"code": "TOOL_TIMEOUT", "tool": name, "timeout_seconds": timeout},
+                    ensure_ascii=False,
+                )
+            ) from None
+
     async def on_call_tool(self, context: MiddlewareContext, call_next: Callable) -> Any:
         self.notifier.remember(context)
         name = context.message.name
@@ -210,7 +256,7 @@ class ControlToolGate(Middleware):
             # Explicit opt-out only: a failed enabled controller still fails closed.
             # Keep shared desktop operations serialized, without creating a lease.
             async with self._call_lock:
-                return await call_next(context)
+                return await self._call_with_deadline(context, call_next)
         from windows_mcp.tools.control_policy import requires_control
 
         if not requires_control(
@@ -269,7 +315,7 @@ class ControlToolGate(Middleware):
                 # A synchronous indicator failure can invalidate the lease
                 # during begin_call's state notification.
                 self.controller.checkpoint(token)
-                return await call_next(context)
+                return await self._call_with_deadline(context, call_next)
             except Exception as exc:
                 from windows_mcp.desktop.control import ControlBlocked
                 from windows_mcp.desktop.control_ledger import InputUnavailable

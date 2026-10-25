@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 
 MAX_BUFFER_SIZE = 500
 
+# A renderer blocked by a native dialog (e.g. a file picker) never answers
+# CDP Runtime.evaluate; without a deadline one stuck tab wedges every later
+# browser call behind it, so evaluates stay bounded.
+EVALUATE_TIMEOUT_SECONDS = 30.0
+VISIBILITY_TIMEOUT_SECONDS = 2.0
+
 
 def resolve_user_browser_endpoint() -> Optional[str]:
     """Auto-detect the WebSocket CDP endpoint from the user's currently running browser (Chrome, Edge, Brave)."""
@@ -246,7 +252,10 @@ class BrowserDevToolsManager:
         visible_idx = None
         for i, p in enumerate(self.pages):
             try:
-                vis = await p.evaluate("document.visibilityState")
+                vis = await asyncio.wait_for(
+                    p.evaluate("document.visibilityState"),
+                    timeout=VISIBILITY_TIMEOUT_SECONDS,
+                )
                 if vis == "visible":
                     visible_idx = i
                     break
@@ -291,17 +300,18 @@ class BrowserDevToolsManager:
         return self.pages[self.active_page_index]
 
     async def _safe_evaluate(self, page: Page, script: str, arg: Any = None) -> Any:
-        try:
+        async def _eval() -> Any:
             if arg is not None:
                 return await page.evaluate(script, arg)
             return await page.evaluate(script)
+
+        try:
+            return await asyncio.wait_for(_eval(), timeout=EVALUATE_TIMEOUT_SECONDS)
         except Exception as e:
             if "Execution context was destroyed" in str(e) or "Navigating frame was detached" in str(e):
                 await page.wait_for_load_state("domcontentloaded")
                 await asyncio.sleep(0.1)
-                if arg is not None:
-                    return await page.evaluate(script, arg)
-                return await page.evaluate(script)
+                return await asyncio.wait_for(_eval(), timeout=EVALUATE_TIMEOUT_SECONDS)
             raise
 
     async def _navigate_internal(self, url: str, wait_until: str, timeout_ms: int, page_id: Optional[int] = None) -> Dict[str, Any]:

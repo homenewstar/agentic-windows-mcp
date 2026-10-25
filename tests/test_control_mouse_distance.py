@@ -1,4 +1,4 @@
-"""Deliberate physical motion takes control; small movements do not pause AI."""
+"""Raw motion is measured per device, but under agent-priority it never takes control."""
 
 import ctypes
 
@@ -15,7 +15,7 @@ def owner_ready():
     return owner, token
 
 
-def test_round_trip_counts_path_length_and_only_threshold_invalidates_token():
+def test_round_trip_counts_path_length_and_never_invalidates_token():
     owner, token = owner_ready()
     generation = owner._generation
     owner._handle(("raw", 1, 300, 0, 10.0))
@@ -23,21 +23,25 @@ def test_round_trip_counts_path_length_and_only_threshold_invalidates_token():
     owner.checkpoint(token)
     assert owner._generation == generation and owner._suppress
     owner._handle(("raw", 1, -1, 0, 10.2))
-    assert owner.status()["state"] == "user"
-    assert not owner._suppress
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
+    # Agent-priority: crossing the former takeover distance changes nothing;
+    # the path length is still measured, but the lease is never preempted.
+    assert owner._raw_distance == 500
+    assert owner.status()["state"] == "ai"
+    assert owner._suppress
+    owner.checkpoint(token)
 
 
-@pytest.mark.parametrize("gap,takes_over", [(0.499, True), (0.5, False), (0.501, False)])
-def test_arrival_gap_boundary_even_when_queue_processing_is_delayed(gap, takes_over):
+@pytest.mark.parametrize("gap,expected_distance", [(0.499, 500), (0.5, 200), (0.501, 200)])
+def test_arrival_gap_boundary_even_when_queue_processing_is_delayed(gap, expected_distance):
     owner, token = owner_ready()
     # These arrivals are deliberately much older than the processing clock.
     owner._handle(("raw", 1, 300, 0, 10.0))
     owner._handle(("raw", 1, 200, 0, 10.0 + gap))
-    assert (owner.status()["state"] == "user") == takes_over
-    if not takes_over:
-        owner.checkpoint(token)
+    # The 0.5s arrival gap still resets the measured segment, but under
+    # agent-priority no distance ever takes control from the AI.
+    assert owner._raw_distance == expected_distance
+    assert owner.status()["state"] == "ai"
+    owner.checkpoint(token)
 
 
 def test_zero_motion_does_not_extend_segment():
@@ -56,7 +60,8 @@ def test_diagonal_distance_and_repeated_small_steps():
     owner.checkpoint(token)
     assert owner._raw_distance == 495
     owner._handle(("raw", 1, 3, 4, 10.1))
-    assert owner.status()["state"] == "user"
+    assert owner._raw_distance == 500
+    assert owner.status()["state"] == "ai"
 
 
 def test_point_and_raw_are_not_added_together():
@@ -115,8 +120,8 @@ def test_unusable_raw_event_does_not_count(monkeypatch):
     owner.checkpoint(token)
 
 
-@pytest.mark.parametrize("last_step,blocked", [(199, False), (200, True)])
-async def test_mcp_affine_tool_continues_below_threshold_and_stops_at_threshold(last_step, blocked):
+@pytest.mark.parametrize("last_step", [199, 200])
+async def test_mcp_affine_tool_continues_below_and_at_former_threshold(last_step):
     """Real MCP gate and UIA dispatch; physical input effects are simulated."""
     from fastmcp import Client, FastMCP
     from agentic_windows_mcp.infrastructure.analytics import with_analytics
@@ -125,7 +130,7 @@ async def test_mcp_affine_tool_continues_below_threshold_and_stops_at_threshold(
     owner = control.ControlCoordinator()
     owner._state = "ready"
     owner._suppress = True
-    mcp = FastMCP("cumulative-mouse-takeover")
+    mcp = FastMCP("cumulative-mouse-motion")
     mcp.add_middleware(ControlToolGate(owner, ControlNotifier(owner)))
     effects = []
 
@@ -145,10 +150,10 @@ async def test_mcp_affine_tool_continues_below_threshold_and_stops_at_threshold(
     try:
         async with Client(mcp) as client:
             result = await client.call_tool("Click", raise_on_error=False)
-        assert result.is_error == blocked
-        assert effects == (["first"] if blocked else ["first", "second"])
-        if blocked:
-            assert "CONTROL_PREEMPTED" in result.content[0].text
+        # Agent-priority: even the step that reaches the former 500-unit
+        # takeover distance completes; motion never preempts a call.
+        assert not result.is_error
+        assert effects == ["first", "second"]
         assert owner._active_calls == 0
     finally:
         owner.stop()

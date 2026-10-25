@@ -36,7 +36,7 @@ def test_start_is_ready_without_physical_input(monkeypatch):
         owner.stop()
 
 
-def test_indicator_ack_precedes_suppression_and_physical_input_wins(monkeypatch):
+def test_indicator_ack_precedes_suppression_and_physical_input_never_wins(monkeypatch):
     owner = ready_controller()
     owner.set_health_probe(lambda: True)
     observed = []
@@ -50,10 +50,13 @@ def test_indicator_ack_precedes_suppression_and_physical_input_wins(monkeypatch)
     event = control._KeyHookData()
     event.vkCode = 0x41
     assert owner._physical_key(0, 0x100, ctypes.addressof(event)) == 7
-    owner.arm_visible(token)  # A late visual acknowledgement cannot reclaim the key.
-    assert not owner._suppress
+    # Agent-priority: a physical key delivered before the visual ack does
+    # not veto arming, and it never takes control from the AI lease.
+    owner.arm_visible(token)
+    assert owner._suppress
+    owner.checkpoint(token)
     owner._handle(owner._events.get_nowait())
-    assert owner.status()["state"] == "user"
+    assert owner.status()["state"] == "ai"
 
 
 def test_indicator_ack_arms_and_capture_pause_releases_physical_input():
@@ -96,7 +99,7 @@ def test_stale_capture_generation_never_rearms_after_takeover():
     )
     owner.begin_call("Screenshot")
     generation = owner.pause_for_capture()
-    owner._handle(("key",))
+    owner._handle(("hotkey",))  # The chord is the only takeover path.
     assert owner.status()["state"] == "user"
     owner.resume_after_capture(generation, restored=True)
     assert not owner._suppress
@@ -125,7 +128,7 @@ def test_opposite_modifier_release_does_not_clear_held_key(monkeypatch, left, ri
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 7)
     owner = ready_controller()
-    owner._handle(("key",))
+    owner._handle(("hotkey",))
 
     def send(vk, message):
         data = control._KeyHookData()
@@ -156,7 +159,7 @@ def test_delivered_modifier_lookup_never_iterates_live_hook_set(generic, side):
     assert not owner.physical_key_down(0x41)
 
 
-def test_start_preserves_cooldown_after_real_physical_input(monkeypatch):
+def test_start_never_enters_user_cooldown_for_recent_physical_input(monkeypatch):
     owner = control.ControlCoordinator()
     monkeypatch.setattr(control, "_interactive_desktop", lambda: True)
 
@@ -169,9 +172,11 @@ def test_start_preserves_cooldown_after_real_physical_input(monkeypatch):
     monkeypatch.setattr(owner, "_run", run)
     owner.start()
     try:
-        assert owner.status()["state"] == "user"
-        with pytest.raises(control.ControlBlocked, match="USER_CONTROL"):
-            owner.begin_call("Wait")
+        # Agent-priority: startup never parks in "user"; calls proceed.
+        assert owner.status()["state"] == "ready"
+        token = owner.begin_call("Wait")
+        owner.checkpoint(token)
+        owner.end_call(token)
     finally:
         owner.stop()
 
@@ -193,7 +198,9 @@ def test_raw_mouse_is_per_device_and_relative():
     owner._handle(("raw", 2, 499, 0))
     assert owner.status()["state"] == "ai"
     owner._handle(("raw", 2, 1, 0))
-    assert owner.status()["state"] == "user"
+    # Agent-priority: travel accumulates per device but never takes over.
+    assert owner._raw_distance == 500
+    assert owner.status()["state"] == "ai"
 
 
 def test_raw_device_switch_resets_previous_candidate():
@@ -204,14 +211,16 @@ def test_raw_device_switch_resets_previous_candidate():
     owner._handle(("raw", 1, 400, 0))
     assert owner.status()["state"] == "ai"
     owner._handle(("raw", 1, 100, 0))
-    assert owner.status()["state"] == "user"
+    # Agent-priority: switching devices resets the segment, never control.
+    assert owner._raw_distance == 500
+    assert owner.status()["state"] == "ai"
 
 
 def test_user_idle_resumes_at_ten_seconds(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     owner = ready_controller()
-    owner._handle(("key",))
+    owner._handle(("hotkey",))
     assert owner.status()["state"] == "user"
     clock[0] = 109.999
     assert owner.status()["state"] == "user"
@@ -226,7 +235,7 @@ def test_user_idle_waits_until_held_mouse_is_released(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     owner = ready_controller()
-    owner._handle(("key",))
+    owner._handle(("hotkey",))
     owner._mouse_down.add(1)
     clock[0] = 111.0
     assert owner.status()["state"] == "user"
@@ -243,7 +252,7 @@ def test_user_idle_counts_physical_up_before_queue_consumption(monkeypatch):
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 7)
     owner = ready_controller()
-    owner._handle(("key",))
+    owner._handle(("hotkey",))
     owner._pressed.add(0x41)
     clock[0] = 111.0
     event = control._KeyHookData()

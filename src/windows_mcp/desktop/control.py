@@ -59,6 +59,7 @@ class ControlCoordinator:
         self._begin_notification = threading.local()
         self._visual_armed = False
         self._visual_paused = False
+        self._dialog_yield = False
         self._visual_event_stamp = 0.0
         self._events: queue.Queue[tuple] = queue.Queue(maxsize=4096)
         self._stop = threading.Event()
@@ -147,6 +148,32 @@ class ControlCoordinator:
                 self._visual_paused = False
         self.arm_visible(generation)
 
+    def set_dialog_yield(self, active: bool) -> None:
+        """Release input suppression while a system consent dialog is up.
+
+        Driven by the browser consent-dialog monitor: Chrome's
+        remote-debugging consent dialog can only be answered by the user,
+        so while it is on screen physical input must flow even during an
+        AI lease. This is NOT a state change -- the in-flight call keeps
+        its lease; only the swallowing of physical events pauses, and it
+        is restored (via the normal visible-arm path) once the dialog
+        closes. Approving the dialog remains the user's own click.
+        """
+        generation: int | None = None
+        with self._lock:
+            if active:
+                if self._state != "ai" or not self._visual_armed or self._dialog_yield:
+                    return
+                self._dialog_yield = True
+                self._suppress = False
+                self.input_ledger.block_new()
+                return
+            if not self._dialog_yield:
+                return
+            self._dialog_yield = False
+            generation = self._generation
+        self.arm_visible(generation)
+
     def _snapshot_locked(self, now: float) -> dict:
         state = (
             "disabled"
@@ -212,6 +239,7 @@ class ControlCoordinator:
         self._generation += 1
         self._visual_armed = state == "ai" and self._health_probe is None
         self._visual_paused = False
+        self._dialog_yield = False
         self._visual_event_stamp = self._last_physical_event
         self._raw_distance = 0.0
         self._raw_device = None

@@ -347,6 +347,12 @@ def _build_mcp() -> FastMCP:
                 control_overlay.start()
                 controller.set_health_probe(control_overlay.is_healthy)
             controller.start()
+            # The browser consent-dialog monitor hands input back to the
+            # user while Chrome's "Allow remote debugging?" dialog is up,
+            # so the user can answer it without a takeover chord.
+            from windows_mcp.browser import consent as _browser_consent
+
+            _browser_consent.set_yield_handler(controller.set_dialog_yield)
             if controller.enabled:
                 notifier.start()
             logger.debug("Server started, entering main loop")

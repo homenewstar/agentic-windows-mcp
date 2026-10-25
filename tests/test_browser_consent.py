@@ -1,14 +1,14 @@
-"""Tests for the remote-debugging consent dialog matcher and switch.
+"""Tests for the remote-debugging consent dialog detector and monitor.
 
-Only the pure logic is exercised here: the UIA/Win32 layer only runs on
-Windows inside the live server, but the decision of WHAT may be clicked
-must never widen beyond the exact Chrome consent prompt.
+Only the pure logic is exercised here: the UIA/Win32 scan only runs on
+Windows inside the live server, but the decision of WHAT counts as the
+consent dialog must never widen beyond the exact Chrome prompt, and the
+monitor must drive the input-yield handler exactly on the dialog's
+appearance/disappearance (the agent never approves the dialog itself --
+it only hands input back so the user can click).
 """
 
 from __future__ import annotations
-
-import sys
-import types
 
 import pytest
 
@@ -67,26 +67,41 @@ def test_find_consent_rejects_partial_matches():
     assert consent.find_consent([]) is None
 
 
-def test_env_override(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("WINDOWS_MCP_AUTO_ALLOW_REMOTE_DEBUGGING", "0")
-    assert consent.auto_allow_enabled() is False
-    monkeypatch.setenv("WINDOWS_MCP_AUTO_ALLOW_REMOTE_DEBUGGING", "false")
-    assert consent.auto_allow_enabled() is False
-    monkeypatch.setenv("WINDOWS_MCP_AUTO_ALLOW_REMOTE_DEBUGGING", "1")
-    assert consent.auto_allow_enabled() is True
+class _Script:
+    """Detector stub returning a scripted sequence of booleans."""
+
+    def __init__(self, values: list[bool]) -> None:
+        self._values = list(values)
+
+    def __call__(self) -> bool:
+        return self._values.pop(0) if self._values else False
 
 
-def test_default_true_without_env_or_config(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("WINDOWS_MCP_AUTO_ALLOW_REMOTE_DEBUGGING", raising=False)
-    fake_config = types.ModuleType("windows_mcp.infrastructure.config")
+def test_monitor_yields_on_appear_and_restores_on_disappear(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[bool] = []
+    monkeypatch.setattr(consent, "_yield_handler", calls.append)
+    monitor = consent.ConsentDialogMonitor(
+        detector=_Script([False, True, True, False, True, False])
+    )
+    assert monitor.poll_once() is False
+    assert calls == []
+    assert monitor.poll_once() is True
+    assert calls == [True]
+    # Still present: re-asserted (self-healing), never treated as a toggle.
+    assert monitor.poll_once() is True
+    assert calls == [True, True]
+    assert monitor.poll_once() is False
+    assert calls == [True, True, False]
+    assert monitor.poll_once() is True
+    assert calls == [True, True, False, True]
+    assert monitor.poll_once() is False
+    assert calls == [True, True, False, True, False]
 
-    class _Browser:
-        auto_allow_remote_debugging = True
 
-    class _Cfg:
-        browser = _Browser()
-
-    fake_config.discover_config_path = lambda _p: None  # type: ignore[attr-defined]
-    fake_config.load_config = lambda _p: _Cfg()  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "windows_mcp.infrastructure.config", fake_config)
-    assert consent.auto_allow_enabled() is True
+def test_monitor_without_handler_is_quiet(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(consent, "_yield_handler", None)
+    monitor = consent.ConsentDialogMonitor(detector=_Script([True, False]))
+    assert monitor.poll_once() is True
+    assert monitor.poll_once() is False

@@ -50,20 +50,11 @@ class ControlConfig:
 
 
 @dataclass
-class BrowserConfig:
-    # The owner asked the server to approve Chrome's remote-debugging
-    # consent dialog itself (see windows_mcp.browser.consent); set to
-    # false in config.toml to require a manual click every time.
-    auto_allow_remote_debugging: bool = True
-
-
-@dataclass
 class WindowsMCPConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
-    browser: BrowserConfig = field(default_factory=BrowserConfig)
     source_path: Path | None = None
 
 
@@ -139,7 +130,6 @@ def load_config(path: Path | None) -> WindowsMCPConfig:
     security = data.get("security", {})
     tools = data.get("tools", {})
     control = data.get("control", {})
-    browser = data.get("browser", {})
 
     _VALID_TRANSPORTS = {"stdio", "sse", "streamable-http"}
     if "transport" in server:
@@ -207,11 +197,6 @@ def load_config(path: Path | None) -> WindowsMCPConfig:
                 raise ValueError(f"control.{key} must be between 40 and 2000")
             setattr(cfg.control, key, value)
 
-    if "auto_allow_remote_debugging" in browser:
-        cfg.browser.auto_allow_remote_debugging = _strict_bool(
-            browser["auto_allow_remote_debugging"], "browser.auto_allow_remote_debugging"
-        )
-
     cfg.source_path = path
     return cfg
 
@@ -274,12 +259,5 @@ def write_config(cfg: WindowsMCPConfig, path: Path) -> None:
         control_lines.append(f"idle_timeout_seconds = {ctrl.idle_timeout_seconds}")
     if control_lines:
         lines += ["[control]", *control_lines, ""]
-
-    if cfg.browser.auto_allow_remote_debugging != BrowserConfig().auto_allow_remote_debugging:
-        lines += [
-            "[browser]",
-            f"auto_allow_remote_debugging = {str(cfg.browser.auto_allow_remote_debugging).lower()}",
-            "",
-        ]
 
     path.write_text("\n".join(lines), encoding="utf-8")

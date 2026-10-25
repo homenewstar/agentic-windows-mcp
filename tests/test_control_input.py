@@ -279,7 +279,7 @@ def test_fail_open_releases_before_slow_health_probe(monkeypatch):
     assert not watcher.is_alive()
 
 
-def test_confirmed_raw_takeover_blocks_new_ai_down(monkeypatch):
+def test_confirmed_raw_motion_never_blocks_new_ai_down(monkeypatch):
     owner = ready_controller()
     token = owner.begin_call("Drag")
     owner.checkpoint(token)
@@ -290,13 +290,16 @@ def test_confirmed_raw_takeover_blocks_new_ai_down(monkeypatch):
     owner.checkpoint(token)
     owner._handle(owner._events.get_nowait())
     owner._handle(("raw", 1, 500, 0))
-    with pytest.raises(InputUnavailable, match="unavailable"):
-        owner.input_ledger.press(
-            "mouse:left", lambda: pytest.fail("late AI down"), lambda: None, lambda: False
-        )
-    assert owner.status()["state"] == "user"
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
+    # Agent-priority: even long deliberate mouse travel is bookkeeping only;
+    # the input ledger stays enabled and the lease is never preempted.
+    actions = []
+    owner.input_ledger.press(
+        "mouse:left", lambda: actions.append("down"), lambda: actions.append("up"), lambda: False
+    )
+    owner.input_ledger.release("mouse:left")
+    assert actions == ["down", "up"]
+    assert owner.status()["state"] == "ai"
+    owner.checkpoint(token)
 
 
 @pytest.mark.parametrize("action", ["scroll", "drag", "multi_select"])
@@ -411,7 +414,8 @@ def test_recovery_requires_ledger_clear_health_and_interactive_desktop(monkeypat
     assert owner.status()["state"] == "unavailable"
     monkeypatch.setattr(control, "_interactive_desktop", lambda: True)
     owner._recover_after_rehook()
-    assert owner.status()["state"] == "user"
+    # Agent-priority: recovery returns to "ready", never to a user cooldown.
+    assert owner.status()["state"] == "ready"
     assert owner.input_ledger.pending() == ()
 
 

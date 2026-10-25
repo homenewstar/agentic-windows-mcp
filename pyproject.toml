@@ -1,6 +1,6 @@
 [project]
 name = "agentic-windows-mcp"
-version = "0.8.8"
+version = "0.8.9"
 description = "Agentic Windows MCP - an MCP server that gives AI agents full, safe control of a Windows PC: desktop automation, remote computer control, browser DevTools inspection, and remote software development."
 authors = [
     { name = "Vu Manh Ruy" }

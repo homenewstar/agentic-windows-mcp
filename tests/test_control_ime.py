@@ -38,12 +38,12 @@ def test_mode_toggle_returns_to_ready_after_idle(case, old_vk, new_vk):
     send_key(owner, old_vk, 0x101, flags=0x80)
     send_key(owner, new_vk, 0x100)
     drain(owner)
-    assert owner.status()["state"] == "user"
+    # Agent-priority: IME mode keys are ordinary physical activity; they
+    # never park the coordinator in "user" or block an agent call.
+    assert owner.status()["state"] == "ready"
     assert owner._last_physical_event == clock[0]
-    with pytest.raises(control.ControlBlocked):
-        owner.begin_call("Move")
     clock[0] = 102.999
-    assert owner.status()["state"] == "user"
+    assert owner.status()["state"] == "ready"
 
     # The active IME mode still has its async high bit set after physical release.
     recovery = StaleInputRecovery()
@@ -106,12 +106,16 @@ def test_other_native_key_events_remain_physical_holds(case, vk, scan, flags):
     clock[0] += 20
     assert owner._pressed == {vk}
     assert owner.physical_key_down(vk)
-    assert owner.status()["state"] == "user"
-    with pytest.raises(control.ControlBlocked, match="PHYSICAL_INPUT_HELD"):
-        owner.begin_call("Move")
+    # Agent-priority: the hold is tracked, but the coordinator stays in
+    # "ready" and a held key never vetoes an agent call.
+    assert owner.status()["state"] == "ready"
+    token = owner.begin_call("Move")
+    owner.checkpoint(token)
+    owner.end_call(token)
+    clock[0] += 20  # Past the post-call lease; suppression is off again.
+    assert owner.status()["state"] == "ready"
     send_key(owner, vk, 0x101, scan, flags | 0x80)
     drain(owner)
-    clock[0] += 3
     assert owner.status()["state"] == "ready"
     assert not owner.physical_key_down(vk)
 
@@ -128,9 +132,12 @@ def test_mode_toggle_does_not_release_another_held_input(case, kind):
     send_key(owner, 0xF3, 0x100)
     drain(owner)
     clock[0] += 20
-    assert owner.status()["state"] == "user"
-    with pytest.raises(control.ControlBlocked, match="PHYSICAL_INPUT_HELD"):
-        owner.begin_call("Move")
+    # Agent-priority: the held input neither takes control nor blocks the
+    # agent, and the IME mode toggle still must not release it.
+    assert owner.status()["state"] == "ready"
+    token = owner.begin_call("Move")
+    owner.checkpoint(token)
+    owner.end_call(token)
     assert owner.physical_key_down(0x41) if kind == "key" else owner.physical_mouse_down("left")
 
 

@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from playwright.async_api import (
     Browser,
@@ -33,6 +34,167 @@ MAX_BUFFER_SIZE = 500
 # browser call behind it, so evaluates stay bounded.
 EVALUATE_TIMEOUT_SECONDS = 30.0
 VISIBILITY_TIMEOUT_SECONDS = 2.0
+
+# CDP deep-inspection limits (raw DevTools domains, beyond Playwright's API).
+MAX_BODY_CHARS_DEFAULT = 20000
+MAX_WS_FRAMES_PER_REQUEST = 50
+MAX_WS_PAYLOAD_CHARS = 2000
+MAX_INDEXEDDB_RECORDS_PER_STORE = 20
+MAX_STORAGE_VALUE_CHARS = 4000
+
+
+class CdpNetworkTracker:
+    """Pure-data tracker fed by CDP domain events for a single page.
+
+    Playwright's own events only expose request/response metadata, so the
+    deep DevTools data (request payloads, per-phase timing, transfer sizes,
+    redirect chains, failures, WebSocket frames, parsed scripts and
+    stylesheets) is collected here from raw CDP events. Kept free of any
+    Playwright objects so it can be unit-tested with synthetic events.
+    """
+
+    def __init__(self) -> None:
+        self.requests: Dict[str, Dict[str, Any]] = {}
+        self.order: List[str] = []
+        self.scripts: Dict[str, Dict[str, Any]] = {}
+        self.stylesheets: Dict[str, Dict[str, Any]] = {}
+
+    def _entry(self, request_id: str) -> Dict[str, Any]:
+        entry = self.requests.get(request_id)
+        if entry is None:
+            entry = {"cdp_request_id": request_id}
+            self.requests[request_id] = entry
+            self.order.append(request_id)
+            if len(self.order) > MAX_BUFFER_SIZE:
+                self.requests.pop(self.order.pop(0), None)
+        return entry
+
+    def on_request_will_be_sent(self, params: Dict[str, Any]) -> None:
+        entry = self._entry(str(params.get("requestId", "")))
+        request = params.get("request", {})
+        # This event fires once per redirect hop for the same requestId:
+        # the URL/method advance to the current hop, but the payload and
+        # initiator belong to the first hop and must not be overwritten
+        # by later hops that omit them.
+        if entry.get("first_url") is None:
+            entry["first_url"] = request.get("url")
+        entry["url"] = request.get("url")
+        entry["method"] = request.get("method")
+        if request.get("headers"):
+            entry["request_headers"] = request["headers"]
+        if request.get("postData") is not None:
+            entry["post_data"] = request.get("postData")
+            entry["has_post_data"] = request.get("hasPostData")
+        if params.get("type") is not None:
+            entry["resource_type"] = params["type"]
+        if params.get("initiator") is not None:
+            entry["initiator"] = params["initiator"]
+        if params.get("wallTime") is not None:
+            entry["wall_time"] = params["wallTime"]
+        if params.get("frameId") is not None:
+            entry["frame_id"] = params["frameId"]
+        redirect = params.get("redirectResponse")
+        if redirect:
+            entry.setdefault("redirect_chain", []).append(
+                {
+                    "url": redirect.get("url"),
+                    "status": redirect.get("status"),
+                    "status_text": redirect.get("statusText"),
+                }
+            )
+
+    def on_response_received(self, params: Dict[str, Any]) -> None:
+        entry = self._entry(str(params.get("requestId", "")))
+        response = params.get("response", {})
+        entry.update(
+            {
+                "url": response.get("url", entry.get("url")),
+                "status": response.get("status"),
+                "status_text": response.get("statusText"),
+                "response_headers": response.get("headers", {}),
+                "mime_type": response.get("mimeType"),
+                "remote_ip": response.get("remoteIPAddress"),
+                "remote_port": response.get("remotePort"),
+                "protocol": response.get("protocol"),
+                "timing": response.get("timing"),
+                "from_disk_cache": response.get("fromDiskCache"),
+                "from_service_worker": response.get("fromServiceWorker"),
+                "security_state": response.get("securityState"),
+                "security_details": response.get("securityDetails"),
+            }
+        )
+
+    def on_loading_finished(self, params: Dict[str, Any]) -> None:
+        entry = self._entry(str(params.get("requestId", "")))
+        entry["encoded_data_length"] = params.get("encodedDataLength")
+        entry["finished"] = True
+
+    def on_loading_failed(self, params: Dict[str, Any]) -> None:
+        entry = self._entry(str(params.get("requestId", "")))
+        entry["failed"] = True
+        entry["error_text"] = params.get("errorText")
+        entry["canceled"] = params.get("canceled")
+        entry["blocked_reason"] = params.get("blockedReason")
+
+    def on_websocket_created(self, params: Dict[str, Any]) -> None:
+        entry = self._entry(str(params.get("requestId", "")))
+        entry["is_websocket"] = True
+        entry["url"] = params.get("url", entry.get("url"))
+        entry.setdefault("websocket_frames", [])
+
+    def on_websocket_frame(self, params: Dict[str, Any], *, sent: bool) -> None:
+        entry = self._entry(str(params.get("requestId", "")))
+        entry["is_websocket"] = True
+        frames = entry.setdefault("websocket_frames", [])
+        entry["websocket_frame_count"] = entry.get("websocket_frame_count", 0) + 1
+        if len(frames) < MAX_WS_FRAMES_PER_REQUEST:
+            response = params.get("response", {})
+            frames.append(
+                {
+                    "direction": "sent" if sent else "received",
+                    "opcode": response.get("opcode"),
+                    "payload": (response.get("payloadData") or "")[:MAX_WS_PAYLOAD_CHARS],
+                }
+            )
+
+    def on_script_parsed(self, params: Dict[str, Any]) -> None:
+        script_id = params.get("scriptId")
+        if script_id is None:
+            return
+        self.scripts[str(script_id)] = {
+            "script_id": str(script_id),
+            "url": params.get("url"),
+            "start_line": params.get("startLine"),
+            "end_line": params.get("endLine"),
+            "length": params.get("length"),
+            "hash": params.get("hash"),
+            "source_map_url": params.get("sourceMapURL"),
+            "execution_context_id": params.get("executionContextId"),
+        }
+
+    def on_stylesheet_added(self, params: Dict[str, Any]) -> None:
+        header = params.get("header", {})
+        stylesheet_id = header.get("styleSheetId")
+        if stylesheet_id is None:
+            return
+        self.stylesheets[str(stylesheet_id)] = {
+            "stylesheet_id": str(stylesheet_id),
+            "source_url": header.get("sourceURL"),
+            "origin": header.get("origin"),
+            "title": header.get("title"),
+            "disabled": header.get("disabled"),
+        }
+
+    def find_by_id(self, request_id: str) -> Optional[Dict[str, Any]]:
+        return self.requests.get(request_id)
+
+    def find_by_url(self, needle: str) -> Optional[Dict[str, Any]]:
+        lowered = needle.lower()
+        for request_id in reversed(self.order):
+            entry = self.requests[request_id]
+            if entry.get("url") and lowered in entry["url"].lower():
+                return entry
+        return None
 
 
 def resolve_user_browser_endpoint() -> Optional[str]:
@@ -92,6 +254,9 @@ class BrowserDevToolsManager:
         self.network_requests: List[Dict[str, Any]] = []
         self.network_details: Dict[str, Dict[str, Any]] = {}
         self._monitored_page_ids: set[int] = set()
+
+        # Raw CDP sessions per page: id(page) -> (page, session, tracker).
+        self._cdp_sessions: Dict[int, Any] = {}
 
         # Dedicated worker loop running ProactorEventLoop
         self._worker_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -197,6 +362,66 @@ class BrowserDevToolsManager:
         page.on("pageerror", handle_pageerror)
         page.on("request", handle_request)
         page.on("response", handle_response)
+
+        # Deep DevTools data needs raw CDP domains; set the session up on
+        # the worker loop without blocking listener attachment.
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is not None:
+            running_loop.create_task(self._setup_cdp_session(page))
+
+    async def _setup_cdp_session(self, page: Page) -> None:
+        """Open a raw CDP session for a page and enable the deep domains."""
+        pid = id(page)
+        existing = self._cdp_sessions.get(pid)
+        if existing is not None and existing[0] is page:
+            return
+        try:
+            session = await page.context.new_cdp_session(page)
+        except Exception as exc:
+            logger.debug("CDP session unavailable for page: %s", exc)
+            return
+        tracker = CdpNetworkTracker()
+        self._cdp_sessions[pid] = (page, session, tracker)
+        session.on("Network.requestWillBeSent", tracker.on_request_will_be_sent)
+        session.on("Network.responseReceived", tracker.on_response_received)
+        session.on("Network.loadingFinished", tracker.on_loading_finished)
+        session.on("Network.loadingFailed", tracker.on_loading_failed)
+        session.on("Network.webSocketCreated", tracker.on_websocket_created)
+        session.on(
+            "Network.webSocketFrameSent",
+            lambda params: tracker.on_websocket_frame(params, sent=True),
+        )
+        session.on(
+            "Network.webSocketFrameReceived",
+            lambda params: tracker.on_websocket_frame(params, sent=False),
+        )
+        session.on("Debugger.scriptParsed", tracker.on_script_parsed)
+        session.on("CSS.styleSheetAdded", tracker.on_stylesheet_added)
+        for method in (
+            "Network.enable",
+            "Debugger.enable",
+            "CSS.enable",
+            "DOM.enable",
+            "Accessibility.enable",
+        ):
+            try:
+                await session.send(method)
+            except Exception as exc:
+                logger.debug("CDP %s failed: %s", method, exc)
+
+    async def _get_cdp(self, page: Page):
+        """Return (session, tracker) for a page, setting them up if needed."""
+        pid = id(page)
+        existing = self._cdp_sessions.get(pid)
+        if existing is None or existing[0] is not page:
+            await self._setup_cdp_session(page)
+            existing = self._cdp_sessions.get(pid)
+        if existing is None:
+            raise RuntimeError("CDP session unavailable for this page")
+        return existing[1], existing[2]
 
     async def _connect_to_user_browser_internal(self, custom_endpoint: Optional[str] = None) -> Dict[str, Any]:
         await self._init_playwright()
@@ -966,3 +1191,464 @@ class BrowserDevToolsManager:
             if request_id_or_url.lower() in r["url"].lower():
                 return r
         return None
+
+    # ------------------------------------------------------------------
+    # Deep DevTools inspection via raw CDP domains
+    # ------------------------------------------------------------------
+
+    async def _get_network_details_deep_internal(
+        self,
+        request_id_or_url: str,
+        include_body: bool,
+        max_body_chars: int,
+        page_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        page = await self._get_page_by_id_or_active(page_id)
+        base = self.get_network_details(request_id_or_url)
+        session = None
+        tracker = None
+        try:
+            session, tracker = await self._get_cdp(page)
+        except Exception:
+            session, tracker = None, None
+        cdp_entry = None
+        if tracker is not None:
+            cdp_entry = tracker.find_by_id(request_id_or_url) or tracker.find_by_url(
+                request_id_or_url
+            )
+            if cdp_entry is None and base and base.get("url"):
+                cdp_entry = tracker.find_by_url(base["url"])
+        if base is None and cdp_entry is None:
+            return None
+        result: Dict[str, Any] = {}
+        if base:
+            result.update({k: v for k, v in base.items() if k != "_start_time"})
+        if cdp_entry:
+            for key, value in cdp_entry.items():
+                if value is not None:
+                    result[key] = value
+        if include_body and cdp_entry and session is not None and not cdp_entry.get("failed"):
+            try:
+                body_result = await session.send(
+                    "Network.getResponseBody",
+                    {"requestId": cdp_entry["cdp_request_id"]},
+                )
+                body = body_result.get("body", "")
+                result["response_body"] = body[:max_body_chars]
+                result["response_body_length"] = len(body)
+                result["response_body_truncated"] = len(body) > max_body_chars
+                result["response_body_base64_encoded"] = bool(
+                    body_result.get("base64Encoded")
+                )
+            except Exception as exc:
+                result["response_body_error"] = str(exc)[:300]
+        return result
+
+    async def _get_storage_internal(
+        self,
+        types: Optional[List[str]],
+        page_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        wanted = set(
+            types
+            or [
+                "cookies",
+                "local_storage",
+                "session_storage",
+                "indexeddb",
+                "cache_storage",
+                "service_workers",
+            ]
+        )
+        result: Dict[str, Any] = {"url": page.url}
+
+        if "cookies" in wanted:
+            try:
+                host = (urlparse(page.url).hostname or "").lower()
+                cookies = []
+                for cookie in await self.context.cookies():
+                    domain = (cookie.get("domain") or "").lstrip(".").lower()
+                    if not host or domain == host or host.endswith("." + domain):
+                        cookies.append(cookie)
+                result["cookies"] = cookies
+                result["cookies_count"] = len(cookies)
+            except Exception as exc:
+                result["cookies_error"] = str(exc)[:300]
+
+        if "local_storage" in wanted or "session_storage" in wanted:
+            try:
+                dumped = await self._safe_evaluate(
+                    page,
+                    """
+                    () => {
+                        const dump = (store) => {
+                            const out = {};
+                            for (let i = 0; i < store.length; i++) {
+                                const key = store.key(i);
+                                const value = String(store.getItem(key));
+                                out[key] = value.length > 4000 ? value.slice(0, 4000) + "…[truncated]" : value;
+                            }
+                            return out;
+                        };
+                        return { local: dump(window.localStorage), session: dump(window.sessionStorage) };
+                    }
+                    """,
+                )
+                if "local_storage" in wanted:
+                    result["local_storage"] = dumped.get("local", {})
+                if "session_storage" in wanted:
+                    result["session_storage"] = dumped.get("session", {})
+            except Exception as exc:
+                result["web_storage_error"] = str(exc)[:300]
+
+        if "indexeddb" in wanted:
+            try:
+                result["indexeddb"] = await self._safe_evaluate(
+                    page,
+                    """
+                    async () => {
+                        if (!window.indexedDB || !indexedDB.databases) {
+                            return { error: "indexedDB.databases() unavailable in this browser" };
+                        }
+                        const infos = await indexedDB.databases();
+                        const databases = [];
+                        for (const info of infos) {
+                            const entry = { name: info.name, version: info.version, stores: [] };
+                            try {
+                                const db = await new Promise((resolve, reject) => {
+                                    const req = indexedDB.open(info.name);
+                                    req.onsuccess = () => resolve(req.result);
+                                    req.onerror = () => reject(req.error);
+                                });
+                                for (const storeName of Array.from(db.objectStoreNames)) {
+                                    const storeData = { name: storeName, count: null, records: [] };
+                                    try {
+                                        const tx = db.transaction(storeName, "readonly");
+                                        const store = tx.objectStore(storeName);
+                                        storeData.count = await new Promise((resolve) => {
+                                            const c = store.count();
+                                            c.onsuccess = () => resolve(c.result);
+                                            c.onerror = () => resolve(null);
+                                        });
+                                        storeData.records = await new Promise((resolve) => {
+                                            const items = [];
+                                            const cursorReq = store.openCursor();
+                                            cursorReq.onsuccess = () => {
+                                                const cursor = cursorReq.result;
+                                                if (cursor && items.length < 20) {
+                                                    let serialized = null;
+                                                    try { serialized = JSON.stringify(cursor.value); } catch (e) { serialized = null; }
+                                                    items.push({
+                                                        key: String(cursor.key),
+                                                        value: serialized && serialized.length > 4000 ? serialized.slice(0, 4000) + "…[truncated json]" : cursor.value,
+                                                    });
+                                                    cursor.continue();
+                                                } else {
+                                                    resolve(items);
+                                                }
+                                            };
+                                            cursorReq.onerror = () => resolve(items);
+                                        });
+                                    } catch (e) {
+                                        storeData.error = String(e);
+                                    }
+                                    entry.stores.push(storeData);
+                                }
+                                db.close();
+                            } catch (e) {
+                                entry.error = String(e);
+                            }
+                            databases.push(entry);
+                        }
+                        return { databases };
+                    }
+                    """,
+                )
+            except Exception as exc:
+                result["indexeddb_error"] = str(exc)[:300]
+
+        if "cache_storage" in wanted:
+            try:
+                result["cache_storage"] = await self._safe_evaluate(
+                    page,
+                    """
+                    async () => {
+                        if (!("caches" in window)) return { error: "Cache Storage unavailable" };
+                        const names = await caches.keys();
+                        const out = [];
+                        for (const name of names) {
+                            const cache = await caches.open(name);
+                            const requests = await cache.keys();
+                            out.push({
+                                name,
+                                entry_count: requests.length,
+                                entries: requests.slice(0, 100).map((r) => r.url),
+                            });
+                        }
+                        return { caches: out };
+                    }
+                    """,
+                )
+            except Exception as exc:
+                result["cache_storage_error"] = str(exc)[:300]
+
+        if "service_workers" in wanted:
+            workers = []
+            try:
+                workers = [
+                    {"url": sw.url} for sw in (self.context.service_workers or [])
+                ]
+            except Exception:
+                workers = []
+            registrations = None
+            try:
+                registrations = await self._safe_evaluate(
+                    page,
+                    """
+                    async () => {
+                        if (!("serviceWorker" in navigator)) return [];
+                        const regs = await navigator.serviceWorker.getRegistrations();
+                        return regs.map((reg) => ({
+                            scope: reg.scope,
+                            active: reg.active ? reg.active.scriptURL : null,
+                            installing: reg.installing ? reg.installing.scriptURL : null,
+                            waiting: reg.waiting ? reg.waiting.scriptURL : null,
+                        }));
+                    }
+                    """,
+                )
+            except Exception as exc:
+                registrations = {"error": str(exc)[:300]}
+            result["service_workers"] = {
+                "context_workers": workers,
+                "registrations": registrations,
+            }
+        return result
+
+    async def _get_matched_styles_internal(
+        self, selector: str, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        session, _tracker = await self._get_cdp(page)
+        document = await session.send("DOM.getDocument", {"depth": 1})
+        root_id = document.get("root", {}).get("nodeId", 0)
+        found = await session.send(
+            "DOM.querySelector", {"nodeId": root_id, "selector": selector}
+        )
+        node_id = found.get("nodeId", 0)
+        if not node_id:
+            raise ValueError(f"Element not found for selector: {selector}")
+        matched = await session.send(
+            "CSS.getMatchedStylesForNode", {"nodeId": node_id}
+        )
+
+        def format_style(style: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+            if not style:
+                return None
+            return {
+                "stylesheet_id": style.get("styleSheetId"),
+                "css_text": style.get("cssText"),
+                "properties": [
+                    {
+                        "name": prop.get("name"),
+                        "value": prop.get("value"),
+                        "important": bool(prop.get("important")),
+                        "disabled": bool(prop.get("disabled")),
+                        "implicit": bool(prop.get("implicit")),
+                    }
+                    for prop in style.get("cssProperties", [])
+                    if prop.get("name")
+                ],
+            }
+
+        def format_rule(rule_entry: Dict[str, Any]) -> Dict[str, Any]:
+            rule = rule_entry.get("rule", {})
+            selector_list = rule.get("selectorList", {})
+            selectors = selector_list.get("selectors", [])
+            texts = [sel.get("text") for sel in selectors]
+            matching = [
+                texts[idx]
+                for idx in rule_entry.get("matchingSelectors", [])
+                if isinstance(idx, int) and 0 <= idx < len(texts)
+            ]
+            return {
+                "selector_text": selector_list.get("text"),
+                "matching_selectors": matching,
+                "origin": rule.get("origin"),
+                "style": format_style(rule.get("style")),
+            }
+
+        return {
+            "selector": selector,
+            "node_id": node_id,
+            "inline_style": format_style(matched.get("inlineStyle")),
+            "attributes_style": format_style(matched.get("attributesStyle")),
+            "matched_rules": [
+                format_rule(entry) for entry in matched.get("matchedCSSRules", [])
+            ],
+            "inherited": [
+                {
+                    "inline_style": format_style(entry.get("inlineStyle")),
+                    "matched_rules": [
+                        format_rule(rule) for rule in entry.get("matchedCSSRules", [])
+                    ],
+                }
+                for entry in matched.get("inherited", [])
+            ],
+            "pseudo_elements": [
+                {
+                    "pseudo_type": entry.get("pseudoType"),
+                    "matched_rules": [
+                        format_rule(rule) for rule in entry.get("matchedCSSRules", [])
+                    ],
+                }
+                for entry in matched.get("pseudoElements", [])
+            ],
+        }
+
+    async def _get_accessibility_tree_internal(
+        self, max_depth: int = 30, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        session, _tracker = await self._get_cdp(page)
+        result = await session.send("Accessibility.getFullAXTree")
+        nodes = result.get("nodes", [])
+        by_id = {node.get("nodeId"): node for node in nodes}
+
+        def ax_value(raw: Any) -> Any:
+            if isinstance(raw, dict):
+                return raw.get("value")
+            return raw
+
+        def build(node: Dict[str, Any], depth: int, seen: set) -> Dict[str, Any]:
+            node_id = node.get("nodeId")
+            item: Dict[str, Any] = {
+                "role": ax_value(node.get("role")),
+                "name": ax_value(node.get("name")),
+                "ignored": bool(node.get("ignored")),
+            }
+            value = ax_value(node.get("value"))
+            if value is not None:
+                item["value"] = value
+            properties = {}
+            for prop in node.get("properties", []):
+                properties[prop.get("name")] = ax_value(prop.get("value"))
+            if properties:
+                item["properties"] = properties
+            if depth < max_depth:
+                children = []
+                for child_id in node.get("childIds", []):
+                    child = by_id.get(child_id)
+                    if child is not None and child_id not in seen:
+                        children.append(build(child, depth + 1, seen | {child_id}))
+                if children:
+                    item["children"] = children
+            return item
+
+        root = next((n for n in nodes if not n.get("parentId")), None)
+        return {
+            "url": page.url,
+            "node_count": len(nodes),
+            "tree": build(root, 0, {root.get("nodeId")}) if root else None,
+        }
+
+    async def _list_page_sources_internal(
+        self, filter_text: Optional[str] = None, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        _session, tracker = await self._get_cdp(page)
+        scripts = list(tracker.scripts.values())
+        stylesheets = list(tracker.stylesheets.values())
+        if filter_text:
+            needle = filter_text.lower()
+            scripts = [s for s in scripts if needle in (s.get("url") or "").lower()]
+            stylesheets = [
+                s for s in stylesheets if needle in (s.get("source_url") or "").lower()
+            ]
+        return {
+            "url": page.url,
+            "scripts": scripts,
+            "stylesheets": stylesheets,
+            "note": (
+                "Only resources parsed since the CDP session attached are listed; "
+                "reload the page to capture everything from the start."
+            ),
+        }
+
+    async def _get_source_text_internal(
+        self,
+        source_id: str,
+        kind: str,
+        max_chars: int,
+        page_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        page = await self._get_page_by_id_or_active(page_id)
+        session, _tracker = await self._get_cdp(page)
+        if kind == "stylesheet":
+            response = await session.send(
+                "CSS.getStyleSheetText", {"styleSheetId": source_id}
+            )
+            text = response.get("text", "")
+        else:
+            response = await session.send(
+                "Debugger.getScriptSource", {"scriptId": source_id}
+            )
+            text = response.get("scriptSource", "")
+        return {
+            "kind": kind,
+            "id": source_id,
+            "length": len(text),
+            "truncated": len(text) > max_chars,
+            "source": text[:max_chars],
+        }
+
+    async def get_network_details_deep(
+        self,
+        request_id_or_url: str,
+        include_body: bool = True,
+        max_body_chars: int = MAX_BODY_CHARS_DEFAULT,
+        page_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return await self._run_in_worker(
+            self._get_network_details_deep_internal(
+                request_id_or_url, include_body, max_body_chars, page_id
+            )
+        )
+
+    async def get_storage(
+        self, types: Optional[List[str]] = None, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        return await self._run_in_worker(self._get_storage_internal(types, page_id))
+
+    async def get_matched_styles(
+        self, selector: str, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        return await self._run_in_worker(
+            self._get_matched_styles_internal(selector, page_id)
+        )
+
+    async def get_accessibility_tree(
+        self, max_depth: int = 30, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        return await self._run_in_worker(
+            self._get_accessibility_tree_internal(max_depth, page_id)
+        )
+
+    async def list_page_sources(
+        self, filter_text: Optional[str] = None, page_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        return await self._run_in_worker(
+            self._list_page_sources_internal(filter_text, page_id)
+        )
+
+    async def get_source_text(
+        self,
+        source_id: str,
+        kind: str = "script",
+        max_chars: int = 50000,
+        page_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return await self._run_in_worker(
+            self._get_source_text_internal(source_id, kind, max_chars, page_id)
+        )

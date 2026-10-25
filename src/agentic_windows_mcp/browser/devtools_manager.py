@@ -432,6 +432,19 @@ class BrowserDevToolsManager:
             raise RuntimeError("CDP session unavailable for this page")
         return existing[1], existing[2]
 
+    async def _ensure_domains(self, session: Any, *methods: str) -> None:
+        """Best-effort (re-)enable of CDP domains right before use.
+
+        Domain enables sent once at session setup can be lost (session
+        re-creation, attach timing), and CSS/DOM queries fail with
+        'agent was not enabled' when they are. Re-enabling is idempotent.
+        """
+        for method in methods:
+            try:
+                await session.send(method)
+            except Exception:
+                pass
+
     async def _connect_to_user_browser_internal(self, custom_endpoint: Optional[str] = None) -> Dict[str, Any]:
         await self._init_playwright()
 
@@ -1561,6 +1574,7 @@ class BrowserDevToolsManager:
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         session, _tracker = await self._get_cdp(page)
+        await self._ensure_domains(session, "CSS.enable", "DOM.enable")
         node_id = await self._resolve_node_id(session, selector)
         if not node_id:
             raise ValueError(
@@ -1640,6 +1654,7 @@ class BrowserDevToolsManager:
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         session, _tracker = await self._get_cdp(page)
+        await self._ensure_domains(session, "Accessibility.enable")
         result = await session.send("Accessibility.getFullAXTree")
         nodes = result.get("nodes", [])
         by_id = {node.get("nodeId"): node for node in nodes}
@@ -1686,6 +1701,7 @@ class BrowserDevToolsManager:
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         _session, tracker = await self._get_cdp(page)
+        await self._ensure_domains(session, "Debugger.enable", "CSS.enable")
         scripts = list(tracker.scripts.values())
         stylesheets = list(tracker.stylesheets.values())
         if filter_text:
@@ -1713,6 +1729,7 @@ class BrowserDevToolsManager:
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         session, _tracker = await self._get_cdp(page)
+        await self._ensure_domains(session, "Debugger.enable", "CSS.enable")
         if kind == "stylesheet":
             response = await session.send(
                 "CSS.getStyleSheetText", {"styleSheetId": source_id}

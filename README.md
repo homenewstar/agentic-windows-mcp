@@ -6,7 +6,7 @@
 
 Điều khiển máy tính từ xa toàn diện · Tự động hóa mọi thao tác · Lập trình trực tiếp trên máy của bạn, từ bất cứ nơi nào
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.md)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE.md)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
 ![Python](https://img.shields.io/badge/Python-3.14%2B-yellow)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-purple)
@@ -264,4 +264,4 @@ Mọi đóng góp đều được hoan nghênh — mở issue hoặc pull reques
 
 ## 📄 Giấy phép
 
-Phát hành theo giấy phép **MIT** — © 2026 **Vu Manh Ruy**. Xem chi tiết trong [LICENSE.md](LICENSE.md).
+Phát hành theo giấy phép **Apache License 2.0** — © 2026 **Vu Manh Ruy**. Xem chi tiết trong [LICENSE.md](LICENSE.md) và [NOTICE](NOTICE).

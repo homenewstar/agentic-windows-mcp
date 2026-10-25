@@ -138,6 +138,75 @@ def test_should_retry_attach_only_while_dialog_present():
     assert consent.should_retry_attach(1, 3, False) is False
 
 
+class _Node:
+    """Minimal UIA control stub for the streaming search."""
+
+    def __init__(self, ctype: str, name: str, children: list["_Node"] | None = None):
+        self.ControlTypeName = ctype
+        self.Name = name
+        self._children = children or []
+
+    def GetChildren(self) -> list["_Node"]:
+        return self._children
+
+
+def test_search_consent_finds_dialog_nested_in_main_window():
+    tree = _Node(
+        "WindowControl",
+        "Chat - Google Chrome",
+        [
+            _Node(
+                "PaneControl",
+                "content",
+                [_Node("TextControl", f"page text {i}") for i in range(50)],
+            ),
+            _Node(
+                "PaneControl",
+                "modal",
+                [
+                    _Node("TextControl", "Cho phép gỡ lỗi từ xa?"),
+                    _Node("ButtonControl", "Cho phép"),
+                    _Node("ButtonControl", "Huỷ"),
+                ],
+            ),
+        ],
+    )
+    assert consent._search_consent(tree, max_depth=6, max_nodes=800) is True
+
+
+def test_search_consent_respects_depth_and_match_strictness():
+    # Allow button without the consent title anywhere: no match.
+    tree = _Node(
+        "WindowControl",
+        "x",
+        [_Node("PaneControl", "p", [_Node("ButtonControl", "Allow")])],
+    )
+    assert consent._search_consent(tree, max_depth=6, max_nodes=800) is False
+    # Dialog buried deeper than max_depth: not found at depth 1, found at 3.
+    deep = _Node(
+        "WindowControl",
+        "x",
+        [
+            _Node(
+                "PaneControl",
+                "a",
+                [
+                    _Node(
+                        "PaneControl",
+                        "b",
+                        [
+                            _Node("TextControl", "Allow remote debugging?"),
+                            _Node("ButtonControl", "Allow"),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    assert consent._search_consent(deep, max_depth=1, max_nodes=800) is False
+    assert consent._search_consent(deep, max_depth=3, max_nodes=800) is True
+
+
 def test_consent_state_reports_monitor(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(consent, "_yield_handler", None)
     monitor = consent.ConsentDialogMonitor(detector=_Script([True]))

@@ -94,30 +94,37 @@ def find_consent(entries: Sequence[NameEntry]) -> Optional[str]:
     return None
 
 
-def _browser_dialog_windows() -> List[int]:
-    """Visible, dialog-sized top-level windows owned by a browser process."""
+def _browser_windows() -> List[Tuple[int, bool]]:
+    """Visible top-level windows of browser processes: (hwnd, is_large).
+
+    The consent prompt is NOT always its own small window: Chrome also
+    renders it as a modal sheet INSIDE the main browser window. Scanning
+    only dialog-sized windows (the first implementation) therefore
+    missed it entirely and the input release never fired -- every
+    browser window must be checked, large ones with a bounded search.
+    """
     import psutil
     import win32gui
     import win32process
 
-    handles: List[int] = []
+    found: List[Tuple[int, bool]] = []
 
     def _cb(hwnd, _extra):
         try:
             if not win32gui.IsWindowVisible(hwnd):
-                return True
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            if (right - left) > MAX_DIALOG_WINDOW_WIDTH or (
-                bottom - top
-            ) > MAX_DIALOG_WINDOW_HEIGHT:
                 return True
             _tid, pid = win32process.GetWindowThreadProcessId(hwnd)
             try:
                 name = psutil.Process(pid).name().lower()
             except Exception:
                 return True
-            if name in BROWSER_PROCESS_NAMES:
-                handles.append(hwnd)
+            if name not in BROWSER_PROCESS_NAMES:
+                return True
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            large = (right - left) > MAX_DIALOG_WINDOW_WIDTH or (
+                bottom - top
+            ) > MAX_DIALOG_WINDOW_HEIGHT
+            found.append((hwnd, large))
         except Exception:
             pass
         return True
@@ -126,7 +133,7 @@ def _browser_dialog_windows() -> List[int]:
         win32gui.EnumWindows(_cb, None)
     except Exception:
         pass
-    return handles
+    return found
 
 
 def _uia_root():
@@ -155,6 +162,40 @@ def _walk_names(root) -> List[NameEntry]:
     return entries
 
 
+def _search_consent(root, max_depth: int, max_nodes: int) -> bool:
+    """Streaming search: True as soon as title AND allow button are seen.
+
+    Depth- and node-bounded so it can run against the full main browser
+    window (whose page subtree is enormous) -- the modal sheet hangs
+    near the top of the window's control tree.
+    """
+    title_seen = False
+    button_seen = False
+    stack = [(root, 0)]
+    seen = 0
+    while stack and seen < max_nodes:
+        ctrl, depth = stack.pop()
+        seen += 1
+        try:
+            ctype = ctrl.ControlTypeName or ""
+            name = ctrl.Name or ""
+        except Exception:
+            continue
+        if not title_seen and is_consent_title(name):
+            title_seen = True
+        if not button_seen and ctype in BUTTON_CONTROL_TYPES and is_allow_label(name):
+            button_seen = True
+        if title_seen and button_seen:
+            return True
+        if depth < max_depth:
+            try:
+                for child in ctrl.GetChildren() or []:
+                    stack.append((child, depth + 1))
+            except Exception:
+                pass
+    return False
+
+
 def detect_consent_dialog() -> bool:
     """True while the remote-debugging consent dialog is on screen."""
     try:
@@ -162,10 +203,16 @@ def detect_consent_dialog() -> bool:
     except Exception:
         return False
     with ctx:
-        for hwnd in _browser_dialog_windows():
+        for hwnd, large in _browser_windows():
             try:
                 root = uia.ControlFromHandle(hwnd)
-                if root is not None and find_consent(_walk_names(root)) is not None:
+                if root is None:
+                    continue
+                if large:
+                    hit = _search_consent(root, max_depth=6, max_nodes=800)
+                else:
+                    hit = _search_consent(root, max_depth=12, max_nodes=MAX_WALK_NODES)
+                if hit:
                     return True
             except Exception:
                 logger.debug("Consent scan failed for one window", exc_info=True)

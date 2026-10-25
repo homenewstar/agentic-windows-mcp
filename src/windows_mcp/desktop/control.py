@@ -118,7 +118,9 @@ class ControlCoordinator:
             self.input_ledger.enable()
             self._visual_armed = True
             self._deadline = time.monotonic() + 1.0
-            self._suppress = True
+            # A dialog yield in progress wins: the indicator may arm, but
+            # suppression must stay off until the consent dialog closes.
+            self._suppress = not self._dialog_yield
             if self._stop.is_set():
                 self._suppress = False
                 self._visual_armed = False
@@ -162,7 +164,10 @@ class ControlCoordinator:
         generation: int | None = None
         with self._lock:
             if active:
-                if self._state != "ai" or not self._visual_armed or self._dialog_yield:
+                # No _visual_armed requirement: the dialog can appear
+                # before the indicator finished arming, and the yield
+                # flag must already be set so arm_visible stays off.
+                if self._state != "ai" or self._dialog_yield:
                     return
                 self._dialog_yield = True
                 self._suppress = False

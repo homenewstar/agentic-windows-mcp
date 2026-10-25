@@ -15,9 +15,9 @@ import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StdioTransport
 
-from windows_mcp.desktop.control import ControlCoordinator
-from windows_mcp.desktop.control_recovery import StaleInputRecovery
-from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+from agentic_windows_mcp.desktop.control import ControlCoordinator
+from agentic_windows_mcp.desktop.control_recovery import StaleInputRecovery
+from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
 
 
 def run_server(marker: Path):

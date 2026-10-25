@@ -8,8 +8,8 @@ SendKeys parser and raise IndexError (#438).
 
 import pytest
 
-from windows_mcp.uia import core
-from windows_mcp.uia.enums import KeyboardEventFlag
+from agentic_windows_mcp.uia import core
+from agentic_windows_mcp.uia.enums import KeyboardEventFlag
 
 KEY_DOWN = KeyboardEventFlag.KeyUnicode | KeyboardEventFlag.KeyDown
 KEY_UP = KeyboardEventFlag.KeyUnicode | KeyboardEventFlag.KeyUp

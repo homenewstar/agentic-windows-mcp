@@ -13,7 +13,7 @@ import ctypes
 
 import pytest
 
-from windows_mcp.uia import core
+from agentic_windows_mcp.uia import core
 
 EARTH = "\U0001f30d"
 GRINNING = "\U0001f600"

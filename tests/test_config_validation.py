@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from windows_mcp.infrastructure.config import ServerConfig, load_config, write_config
+from agentic_windows_mcp.infrastructure.config import ServerConfig, load_config, write_config
 
 
 @pytest.mark.parametrize(

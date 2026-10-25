@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from windows_mcp.powershell.utils import run_with_graceful_timeout
+from agentic_windows_mcp.powershell.utils import run_with_graceful_timeout
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only creation flags")
 

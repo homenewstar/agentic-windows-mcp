@@ -1,10 +1,10 @@
 from unittest.mock import patch
 
-from windows_mcp import registry
-from windows_mcp.powershell.utils import ps_quote
+from agentic_windows_mcp import registry
+from agentic_windows_mcp.powershell.utils import ps_quote
 
 
-EXECUTE_COMMAND_PATH = "windows_mcp.powershell.PowerShellExecutor.execute_command"
+EXECUTE_COMMAND_PATH = "agentic_windows_mcp.powershell.PowerShellExecutor.execute_command"
 
 
 class TestPsQuote:

@@ -27,9 +27,9 @@ showed 25/25 divergent outputs when re-threaded).
 Notes
 -----
 - This file imports the real `Desktop` class, so it only runs where
-  pywin32 / windows_mcp's Windows-only dependencies are installed
+  pywin32 / agentic_windows_mcp's Windows-only dependencies are installed
   (i.e. on Windows, or wherever your CI already runs the rest of the
-  windows_mcp test suite). It will fail to import on Linux/macOS.
+  agentic_windows_mcp test suite). It will fail to import on Linux/macOS.
 - Adjust the import path below to match your repo layout if it differs.
 """
 import hashlib
@@ -40,8 +40,8 @@ import pytest
 from PIL import Image
 
 # Adjust this import if Desktop lives elsewhere in your repo.
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.tree.views import BoundingBox, TreeElementNode
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.tree.views import BoundingBox, TreeElementNode
 
 NUM_NODES = 150
 TRIALS = 15
@@ -86,7 +86,7 @@ def desktop(monkeypatch):
     # Make color assignment order-independent: fixed value regardless of
     # call order, so the ONLY source of run-to-run difference left is
     # thread interleaving itself, not scheduling-dependent color choice.
-    import windows_mcp.desktop.service as core_module
+    import agentic_windows_mcp.desktop.service as core_module
     monkeypatch.setattr(core_module.random, "randint", lambda a, b: 0x336699)
     return d
 

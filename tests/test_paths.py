@@ -1,8 +1,8 @@
-"""Tests for windows_mcp.paths — Claude Desktop data directory resolution."""
+"""Tests for agentic_windows_mcp.paths — Claude Desktop data directory resolution."""
 
 from unittest.mock import patch
 
-from windows_mcp.paths import (
+from agentic_windows_mcp.paths import (
     get_claude_config_path,
     get_claude_data_dir,
     is_msix_install,

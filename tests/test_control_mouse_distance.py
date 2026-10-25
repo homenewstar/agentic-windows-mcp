@@ -4,7 +4,7 @@ import ctypes
 
 import pytest
 
-from windows_mcp.desktop import control, control_hooks
+from agentic_windows_mcp.desktop import control, control_hooks
 
 
 def owner_ready():
@@ -119,8 +119,8 @@ def test_unusable_raw_event_does_not_count(monkeypatch):
 async def test_mcp_affine_tool_continues_below_threshold_and_stops_at_threshold(last_step, blocked):
     """Real MCP gate and UIA dispatch; physical input effects are simulated."""
     from fastmcp import Client, FastMCP
-    from windows_mcp.infrastructure.analytics import with_analytics
-    from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+    from agentic_windows_mcp.infrastructure.analytics import with_analytics
+    from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
 
     owner = control.ControlCoordinator()
     owner._state = "ready"

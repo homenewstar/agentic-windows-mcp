@@ -4,8 +4,8 @@ from collections.abc import Callable
 
 import pytest
 
-from windows_mcp.tools import display as display_tool_module
-from windows_mcp.uia import DisplayInfo, Rect, core
+from agentic_windows_mcp.tools import display as display_tool_module
+from agentic_windows_mcp.uia import DisplayInfo, Rect, core
 
 
 class FakeMCP:

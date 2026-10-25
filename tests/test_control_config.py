@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from windows_mcp.infrastructure.config import (
+from agentic_windows_mcp.infrastructure.config import (
     ControlConfig,
     WindowsMCPConfig,
     load_config,

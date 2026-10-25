@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from windows_mcp.desktop import control
+from agentic_windows_mcp.desktop import control
 
 
 def ready_controller() -> control.ControlCoordinator:
@@ -103,7 +103,7 @@ def test_stale_capture_generation_never_rearms_after_takeover():
 
 
 def test_watchdog_does_not_rearm_hidden_indicator(monkeypatch):
-    from windows_mcp.desktop.control_worker import refresh_deadline
+    from agentic_windows_mcp.desktop.control_worker import refresh_deadline
 
     owner = ready_controller()
     owner.set_health_probe(lambda: True)
@@ -283,7 +283,7 @@ def test_small_movement_preserves_current_call(monkeypatch):
     owner.checkpoint(token)
 
 
-@pytest.mark.parametrize("press_order", [(0x11, 0x12, 0x10, 0x08), (0x10, 0x12, 0x11, 0x08)])
+@pytest.mark.parametrize("press_order", [(0x11, 0x12, 0x10, 0x20), (0x10, 0x12, 0x11, 0x20)])
 def test_hotkey_fast_path_releases_before_coordinator_and_quarantines_up(monkeypatch, press_order):
     owner = ready_controller()
     owner.begin_call("Type")
@@ -299,8 +299,8 @@ def test_hotkey_fast_path_releases_before_coordinator_and_quarantines_up(monkeyp
         assert send(vk, 0x100) == 1
     assert not owner._suppress
     assert owner._fast_takeover
-    assert send(0x08, 0x100) == 1  # Repeated Backspace is still swallowed.
-    for vk in (0x08, 0x10, 0x12, 0x11):
+    assert send(0x20, 0x100) == 1  # Repeated Space is still swallowed.
+    for vk in (0x20, 0x10, 0x12, 0x11):
         assert send(vk, 0x101) == 1
     assert not owner._quarantine
     owner._handle(("hotkey",))
@@ -308,7 +308,7 @@ def test_hotkey_fast_path_releases_before_coordinator_and_quarantines_up(monkeyp
     assert send(0x41, 0x100) == 7
 
 
-def test_backspace_repeat_after_modifiers_does_not_trigger_hotkey(monkeypatch):
+def test_space_repeat_after_modifiers_does_not_trigger_hotkey(monkeypatch):
     owner = ready_controller()
     owner.begin_call("Type")
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 7)
@@ -318,7 +318,7 @@ def test_backspace_repeat_after_modifiers_does_not_trigger_hotkey(monkeypatch):
         data.vkCode = vk
         return owner._physical_key(0, 0x100, ctypes.addressof(data))
 
-    for vk in (0x08, 0x11, 0x12, 0x10, 0x08):
+    for vk in (0x20, 0x11, 0x12, 0x10, 0x20):
         assert down(vk) == 1
     assert not owner._fast_takeover
     assert owner._suppress
@@ -390,7 +390,7 @@ def test_stop_rejects_still_running_hook_thread():
 
 
 def test_watchdog_cannot_refresh_if_coordinator_lock_is_held(monkeypatch):
-    from windows_mcp.desktop.control_worker import refresh_deadline
+    from agentic_windows_mcp.desktop.control_worker import refresh_deadline
 
     owner = ready_controller()
     owner.begin_call("Type")

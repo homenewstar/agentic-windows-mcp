@@ -11,7 +11,7 @@ digits int() cannot parse (e.g. the superscript ``"²"``).
 
 import pytest
 
-from windows_mcp.tools.input import _as_point
+from agentic_windows_mcp.tools.input import _as_point
 
 
 def test_accepts_plain_and_signed_integer_strings():

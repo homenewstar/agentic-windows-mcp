@@ -3,7 +3,7 @@
 The backend chain only ever fell through when a backend *raised*. On VM/RDP
 guests dxcam instead initializes cleanly and then returns frames with no pixel
 data, so the chain happily returned them and the client received an undecodable
-image. The reporter's workaround was to pin WINDOWS_MCP_SCREENSHOT_BACKEND=mss
+image. The reporter's workaround was to pin AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND=mss
 by hand; these tests cover doing that automatically.
 """
 
@@ -12,8 +12,8 @@ from _ctypes import COMError
 import pytest
 from PIL import Image
 
-from windows_mcp.desktop import screenshot as screenshot_mod
-from windows_mcp.desktop.screenshot import _is_usable_capture, capture
+from agentic_windows_mcp.desktop import screenshot as screenshot_mod
+from agentic_windows_mcp.desktop.screenshot import _is_usable_capture, capture
 
 
 def good_image(size=(8, 8)) -> Image.Image:

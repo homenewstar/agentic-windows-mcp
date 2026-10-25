@@ -5,9 +5,9 @@ from collections.abc import Callable
 
 import pytest
 
-from windows_mcp.desktop.views import DesktopState, Status, Window
-from windows_mcp.tools.input import register
-from windows_mcp.tree.views import BoundingBox, Center, TextElementNode, TreeElementNode, TreeState
+from agentic_windows_mcp.desktop.views import DesktopState, Status, Window
+from agentic_windows_mcp.tools.input import register
+from agentic_windows_mcp.tree.views import BoundingBox, Center, TextElementNode, TreeElementNode, TreeState
 
 
 class FakeMCP:

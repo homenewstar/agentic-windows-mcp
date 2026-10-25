@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from windows_mcp.tree.views import (
+from agentic_windows_mcp.tree.views import (
     BoundingBox,
     Center,
     ScrollElementNode,
@@ -73,7 +73,7 @@ class TestTreeState:
         )
         result = ts.interactive_elements_to_string()
         assert "500-element capture limit" in result
-        assert "WINDOWS_MCP_MAX_TREE_ELEMENTS" in result
+        assert "AGENTIC_WINDOWS_MCP_MAX_TREE_ELEMENTS" in result
 
     def test_truncated_appends_note_to_scrollable_elements(
         self, sample_scroll_element_node: ScrollElementNode

@@ -5,8 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from windows_mcp.desktop import control
-from windows_mcp.desktop.control_recovery import StaleInputRecovery
+from agentic_windows_mcp.desktop import control
+from agentic_windows_mcp.desktop.control_recovery import StaleInputRecovery
 
 
 @pytest.fixture

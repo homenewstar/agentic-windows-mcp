@@ -25,7 +25,7 @@ async def test_disabled_stdio_background_command_and_status(tmp_path, policy):
         command=sys.executable,
         args=[
             "-m",
-            "windows_mcp",
+            "agentic_windows_mcp",
             "serve",
             "--config",
             str(config),
@@ -42,7 +42,7 @@ async def test_disabled_stdio_background_command_and_status(tmp_path, policy):
         env={
             **os.environ,
             "ANONYMIZED_TELEMETRY": "false",
-            "WINDOWS_MCP_WATCHDOG": "false",
+            "AGENTIC_WINDOWS_MCP_WATCHDOG": "false",
             "PYTHONPATH": str(root / "src"),
         },
     )

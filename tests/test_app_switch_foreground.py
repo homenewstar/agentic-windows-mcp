@@ -3,9 +3,9 @@ from unittest.mock import Mock
 import pytest
 from fastmcp import Client, FastMCP
 
-from windows_mcp.desktop import service
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.tools import app
+from agentic_windows_mcp.desktop import service
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.tools import app
 
 
 @pytest.fixture

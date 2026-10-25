@@ -16,8 +16,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.infrastructure import safe_get, validate_url
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.infrastructure import safe_get, validate_url
 
 
 @contextmanager
@@ -75,7 +75,7 @@ def _patch_validator(monkeypatch, blocked: set[str]) -> list[str]:
                 f"Private, loopback, link-local, multicast, and reserved addresses are blocked: {url}"
             )
 
-    monkeypatch.setattr("windows_mcp.infrastructure.security.validate_url", fake_validate_url)
+    monkeypatch.setattr("agentic_windows_mcp.infrastructure.security.validate_url", fake_validate_url)
     return seen
 
 
@@ -197,7 +197,7 @@ def test_safe_get_ignores_dns_that_changes_after_validation(monkeypatch) -> None
 
         monkeypatch.setattr(socket, "getaddrinfo", rebinding_getaddrinfo)
         monkeypatch.setattr(
-            "windows_mcp.infrastructure.security._is_private_target", lambda ip: False
+            "agentic_windows_mcp.infrastructure.security._is_private_target", lambda ip: False
         )
 
         response = safe_get(f"http://rebind.example:{port}/page", timeout=5)

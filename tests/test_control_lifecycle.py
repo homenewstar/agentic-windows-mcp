@@ -4,11 +4,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from windows_mcp import __main__ as cli
-from windows_mcp.desktop import control, control_overlay, service
-from windows_mcp.infrastructure.config import ControlConfig
-from windows_mcp.tools import control_status
-from windows_mcp.tools.control_notifications import ControlNotifier
+from agentic_windows_mcp import __main__ as cli
+from agentic_windows_mcp.desktop import control, control_overlay, service
+from agentic_windows_mcp.infrastructure.config import ControlConfig
+from agentic_windows_mcp.tools import control_status
+from agentic_windows_mcp.tools.control_notifications import ControlNotifier
 
 
 @pytest.mark.asyncio

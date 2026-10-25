@@ -1,4 +1,4 @@
-from windows_mcp.tree.budget import (
+from agentic_windows_mcp.tree.budget import (
     DEFAULT_MAX_TREE_ELEMENTS,
     TreeElementBudget,
     resolve_max_tree_elements,
@@ -61,21 +61,21 @@ class TestResolveMaxTreeElements:
 
     def test_default_when_blank(self):
         assert (
-            resolve_max_tree_elements({"WINDOWS_MCP_MAX_TREE_ELEMENTS": "  "})
+            resolve_max_tree_elements({"AGENTIC_WINDOWS_MCP_MAX_TREE_ELEMENTS": "  "})
             == DEFAULT_MAX_TREE_ELEMENTS
         )
 
     def test_valid_override(self):
-        assert resolve_max_tree_elements({"WINDOWS_MCP_MAX_TREE_ELEMENTS": "150"}) == 150
+        assert resolve_max_tree_elements({"AGENTIC_WINDOWS_MCP_MAX_TREE_ELEMENTS": "150"}) == 150
 
     def test_invalid_value_falls_back_to_default(self):
         assert (
-            resolve_max_tree_elements({"WINDOWS_MCP_MAX_TREE_ELEMENTS": "not-a-number"})
+            resolve_max_tree_elements({"AGENTIC_WINDOWS_MCP_MAX_TREE_ELEMENTS": "not-a-number"})
             == DEFAULT_MAX_TREE_ELEMENTS
         )
 
     def test_zero_falls_back_to_default(self):
-        assert resolve_max_tree_elements({"WINDOWS_MCP_MAX_TREE_ELEMENTS": "0"}) == DEFAULT_MAX_TREE_ELEMENTS
+        assert resolve_max_tree_elements({"AGENTIC_WINDOWS_MCP_MAX_TREE_ELEMENTS": "0"}) == DEFAULT_MAX_TREE_ELEMENTS
 
     def test_negative_falls_back_to_default(self):
-        assert resolve_max_tree_elements({"WINDOWS_MCP_MAX_TREE_ELEMENTS": "-5"}) == DEFAULT_MAX_TREE_ELEMENTS
+        assert resolve_max_tree_elements({"AGENTIC_WINDOWS_MCP_MAX_TREE_ELEMENTS": "-5"}) == DEFAULT_MAX_TREE_ELEMENTS

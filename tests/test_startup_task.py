@@ -4,14 +4,14 @@ from unittest.mock import Mock
 from click.testing import CliRunner
 import pytest
 
-from windows_mcp.__main__ import main
-import windows_mcp.__main__ as cli
+from agentic_windows_mcp.__main__ import main
+import agentic_windows_mcp.__main__ as cli
 
 
 def test_resolve_program_uses_running_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli.sys, "executable", "C:\\Tools\\python.exe")
 
-    assert cli._resolve_program() == ["C:\\Tools\\python.exe", "-m", "windows_mcp"]
+    assert cli._resolve_program() == ["C:\\Tools\\python.exe", "-m", "agentic_windows_mcp"]
 
 
 def test_install_writes_start_script_and_creates_task(
@@ -52,7 +52,7 @@ def test_install_writes_start_script_and_creates_task(
     assert result.exit_code == 0, result.output
     script = start_script.read_text(encoding="utf-8")
     assert (
-        '"C:\\Program Files\\Python\\python.exe" -m windows_mcp serve --transport sse '
+        '"C:\\Program Files\\Python\\python.exe" -m agentic_windows_mcp serve --transport sse '
         "--host 127.0.0.1 --port 9000"
     ) in script
     assert '1>>"' in script

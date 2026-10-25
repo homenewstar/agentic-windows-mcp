@@ -39,8 +39,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-_UV_LOCK_WINDOWS_MCP = re.compile(
-    r'^\[\[package\]\]\nname = "windows-mcp"\nversion = "([^"]+)"',
+_UV_LOCK_AGENTIC_WINDOWS_MCP = re.compile(
+    r'^\[\[package\]\]\nname = "agentic-windows-mcp"\nversion = "([^"]+)"',
     re.MULTILINE,
 )
 
@@ -61,10 +61,10 @@ def collect_versions(root: Path = REPO_ROOT) -> dict[str, str]:
         raise ValueError("pyproject.toml is missing [project] version") from exc
 
     lock_text = (root / "uv.lock").read_text(encoding="utf-8")
-    match = _UV_LOCK_WINDOWS_MCP.search(lock_text)
+    match = _UV_LOCK_AGENTIC_WINDOWS_MCP.search(lock_text)
     if match is None:
-        raise ValueError("uv.lock has no [[package]] entry for windows-mcp")
-    versions["uv.lock:windows-mcp"] = match.group(1)
+        raise ValueError("uv.lock has no [[package]] entry for agentic-windows-mcp")
+    versions["uv.lock:agentic-windows-mcp"] = match.group(1)
 
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if "version" not in manifest:

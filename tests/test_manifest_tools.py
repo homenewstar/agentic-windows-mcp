@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from windows_mcp.tools import register_all
+from agentic_windows_mcp.tools import register_all
 
 MANIFEST_PATH = Path(__file__).resolve().parent.parent / "manifest.json"
 

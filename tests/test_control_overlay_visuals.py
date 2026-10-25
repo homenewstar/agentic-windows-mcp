@@ -2,7 +2,7 @@
 
 import pytest
 
-from windows_mcp.desktop import control_overlay, control_overlay_art, flash_overlay
+from agentic_windows_mcp.desktop import control_overlay, control_overlay_art, flash_overlay
 
 
 def _assert_premultiplied(bgra: bytes) -> None:
@@ -21,9 +21,9 @@ def test_notice_uses_clear_english_and_transparent_corners():
     # not advertise mouse movement as a way to take over.
     assert not hasattr(control_overlay_art, "_NOTICE_MOUSE_HINT")
     assert (
-        control_overlay_art._NOTICE_HINT == "Press Ctrl + Alt + Shift + Backspace to take over"
+        control_overlay_art._NOTICE_HINT == "Press Ctrl + Alt + Shift + Space to take over"
     )
-    assert control_overlay_art._NOTICE_SHORTCUT == "Ctrl + Alt + Shift + Backspace"
+    assert control_overlay_art._NOTICE_SHORTCUT == "Ctrl + Alt + Shift + Space"
     notice = control_overlay_art._notice_bitmap(1920)
     assert notice is not None
     width, height, bgra = notice

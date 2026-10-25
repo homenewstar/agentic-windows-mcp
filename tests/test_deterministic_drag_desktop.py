@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import Mock
 
-from windows_mcp.desktop import service
-from windows_mcp.desktop.control_ledger import InputLedger
-from windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.desktop import service
+from agentic_windows_mcp.desktop.control_ledger import InputLedger
+from agentic_windows_mcp.desktop.service import Desktop
 
 
 def _desktop() -> Desktop:

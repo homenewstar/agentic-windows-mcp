@@ -7,8 +7,8 @@ integration testing.
 
 from unittest.mock import MagicMock
 
-from windows_mcp.tree import ia2
-from windows_mcp.tree.views import BoundingBox, TextElementNode, TreeElementNode
+from agentic_windows_mcp.tree import ia2
+from agentic_windows_mcp.tree.views import BoundingBox, TextElementNode, TreeElementNode
 
 
 class TestRoleName:

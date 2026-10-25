@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from windows_mcp.desktop import control, control_worker
+from agentic_windows_mcp.desktop import control, control_worker
 
 
 class ClockWake:

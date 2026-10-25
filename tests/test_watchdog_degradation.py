@@ -1,6 +1,6 @@
 """Regression tests for issue #374 — a failing watchdog must not kill startup.
 
-`windows_mcp/watchdog/event_handlers.py` builds the UIA client at module scope
+`agentic_windows_mcp/watchdog/event_handlers.py` builds the UIA client at module scope
 and evaluates `UIA.IUIAutomation*EventHandler` when the handler classes are
 created, so merely importing the watchdog constructs COM. When the comtypes
 generated-module cache is mid-regeneration, that import raises and used to
@@ -8,7 +8,7 @@ abort the whole server: every tool went down because an optional component
 could not start.
 
 The watchdog only refreshes cached UI state, and is already optional via
-WINDOWS_MCP_WATCHDOG, so any failure setting it up should degrade to running
+AGENTIC_WINDOWS_MCP_WATCHDOG, so any failure setting it up should degrade to running
 without it.
 """
 
@@ -18,9 +18,9 @@ import types
 
 import pytest
 
-import windows_mcp.__main__ as cli
+import agentic_windows_mcp.__main__ as cli
 
-WATCHDOG_MODULE = "windows_mcp.watchdog.service"
+WATCHDOG_MODULE = "agentic_windows_mcp.watchdog.service"
 
 
 class FakeWatchDog:
@@ -57,11 +57,11 @@ def desktop():
 @pytest.fixture(autouse=True)
 def watchdog_enabled(monkeypatch):
     """Opt in for these tests; the real env var must not leak in either way."""
-    monkeypatch.setenv("WINDOWS_MCP_WATCHDOG", "on")
+    monkeypatch.setenv("AGENTIC_WINDOWS_MCP_WATCHDOG", "on")
 
 
 def install_fake_module(monkeypatch, watchdog_factory):
-    """Make `from windows_mcp.watchdog.service import WatchDog` yield a fake.
+    """Make `from agentic_windows_mcp.watchdog.service import WatchDog` yield a fake.
 
     Importing the real module builds COM, which is the very thing under test.
     """
@@ -76,7 +76,7 @@ class TestFailuresDegrade:
         # ImportError, standing in for a half-written comtypes.gen module.
         monkeypatch.setitem(sys.modules, WATCHDOG_MODULE, None)
 
-        with caplog.at_level(logging.WARNING, logger="windows_mcp.__main__"):
+        with caplog.at_level(logging.WARNING, logger="agentic_windows_mcp.__main__"):
             assert cli._start_watchdog(desktop) is None
 
         assert any(r.levelno == logging.WARNING for r in caplog.records)
@@ -89,7 +89,7 @@ class TestFailuresDegrade:
 
         install_fake_module(monkeypatch, explode)
 
-        with caplog.at_level(logging.WARNING, logger="windows_mcp.__main__"):
+        with caplog.at_level(logging.WARNING, logger="agentic_windows_mcp.__main__"):
             assert cli._start_watchdog(desktop) is None
 
         assert any(r.levelno == logging.WARNING for r in caplog.records)
@@ -105,7 +105,7 @@ class TestFailuresDegrade:
 
         install_fake_module(monkeypatch, factory)
 
-        with caplog.at_level(logging.WARNING, logger="windows_mcp.__main__"):
+        with caplog.at_level(logging.WARNING, logger="agentic_windows_mcp.__main__"):
             assert cli._start_watchdog(desktop) is None
 
         assert built[0].stopped, "a half-started watchdog must be stopped"
@@ -124,7 +124,7 @@ class TestHealthyPath:
     def test_no_warning_when_healthy(self, desktop, monkeypatch, caplog):
         install_fake_module(monkeypatch, FakeWatchDog)
 
-        with caplog.at_level(logging.WARNING, logger="windows_mcp.__main__"):
+        with caplog.at_level(logging.WARNING, logger="agentic_windows_mcp.__main__"):
             cli._start_watchdog(desktop)
 
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
@@ -133,7 +133,7 @@ class TestHealthyPath:
 class TestDisabled:
     @pytest.mark.parametrize("value", ["off", "0", "false", "no", "disabled", "OFF", " off "])
     def test_disabled_never_imports_the_watchdog(self, desktop, monkeypatch, value):
-        monkeypatch.setenv("WINDOWS_MCP_WATCHDOG", value)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_WATCHDOG", value)
         # Would raise ImportError if the disabled path tried to import at all.
         monkeypatch.setitem(sys.modules, WATCHDOG_MODULE, None)
 
@@ -141,13 +141,13 @@ class TestDisabled:
 
     def test_off_by_default_never_imports_the_watchdog(self, desktop, monkeypatch):
         """The watchdog is opt-in, so an unset env var must not even import it."""
-        monkeypatch.delenv("WINDOWS_MCP_WATCHDOG", raising=False)
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_WATCHDOG", raising=False)
         monkeypatch.setitem(sys.modules, WATCHDOG_MODULE, None)
 
         assert cli._start_watchdog(desktop) is None
 
     def test_explicit_opt_in_starts_it(self, desktop, monkeypatch):
-        monkeypatch.setenv("WINDOWS_MCP_WATCHDOG", "on")
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_WATCHDOG", "on")
         install_fake_module(monkeypatch, FakeWatchDog)
 
         assert cli._start_watchdog(desktop) is not None

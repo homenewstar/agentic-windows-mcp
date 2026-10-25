@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from windows_mcp.tools import scrape as scrape_tool_module
-from windows_mcp.tree.views import BoundingBox, Center, ScrollElementNode, TextElementNode
+from agentic_windows_mcp.tools import scrape as scrape_tool_module
+from agentic_windows_mcp.tree.views import BoundingBox, Center, ScrollElementNode, TextElementNode
 
 
 class FakeMCP:

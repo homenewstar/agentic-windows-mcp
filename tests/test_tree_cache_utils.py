@@ -1,7 +1,7 @@
 from _ctypes import COMError
 from unittest.mock import MagicMock
 
-from windows_mcp.tree.cache_utils import CachedControlHelper
+from agentic_windows_mcp.tree.cache_utils import CachedControlHelper
 
 
 UIA_E_ELEMENTNOTAVAILABLE = -2147220991

@@ -6,8 +6,8 @@ from unittest.mock import Mock
 import pytest
 from fastmcp import Client, FastMCP
 
-from windows_mcp.desktop import control
-from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+from agentic_windows_mcp.desktop import control
+from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
 
 
 @pytest.mark.parametrize("state", ["ready", "ai"])
@@ -105,7 +105,7 @@ def test_disabled_start_status_and_cleanup(monkeypatch):
 
 
 def test_disabled_desktop_drag_still_injects_and_releases(monkeypatch):
-    from windows_mcp.desktop import service
+    from agentic_windows_mcp.desktop import service
 
     owner = control.ControlCoordinator()
     owner.enabled = False

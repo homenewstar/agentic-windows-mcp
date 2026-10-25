@@ -9,8 +9,8 @@ test).
 import comtypes
 import pytest
 
-from windows_mcp.watchdog.event_handlers import FocusChangedEventHandler
-from windows_mcp.watchdog.service import FAIL_THRESHOLD, WatchDog
+from agentic_windows_mcp.watchdog.event_handlers import FocusChangedEventHandler
+from agentic_windows_mcp.watchdog.service import FAIL_THRESHOLD, WatchDog
 
 
 def _com_error():

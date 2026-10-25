@@ -1,6 +1,6 @@
 import pytest
 
-from windows_mcp.filesystem.service import copy_path, move_path
+from agentic_windows_mcp.filesystem.service import copy_path, move_path
 
 
 @pytest.mark.parametrize("operation", [copy_path, move_path])

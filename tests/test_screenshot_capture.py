@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-import windows_mcp.desktop.screenshot as screenshot
-from windows_mcp.desktop.screenshot import (
+import agentic_windows_mcp.desktop.screenshot as screenshot
+from agentic_windows_mcp.desktop.screenshot import (
     DxcamOutput,
     _DxcamBackend,
     _MssBackend,
@@ -21,7 +21,7 @@ from windows_mcp.desktop.screenshot import (
     capture,
     get_screenshot_backend,
 )
-from windows_mcp.uia import Rect
+from agentic_windows_mcp.uia import Rect
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,19 +102,19 @@ class TestBackendRegistry:
 class TestGetScreenshotBackend:
     @pytest.mark.parametrize("value", ["auto", "pillow", "dxcam", "mss"])
     def test_valid_values_returned_as_is(self, monkeypatch, value):
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", value)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", value)
         assert get_screenshot_backend() == value
 
     def test_invalid_value_falls_back_to_auto(self, monkeypatch):
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", "bogus")
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", "bogus")
         assert get_screenshot_backend() == "auto"
 
     def test_default_is_auto(self, monkeypatch):
-        monkeypatch.delenv("WINDOWS_MCP_SCREENSHOT_BACKEND", raising=False)
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", raising=False)
         assert get_screenshot_backend() == "auto"
 
     def test_whitespace_and_case_insensitive(self, monkeypatch):
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", "  Pillow  ")
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", "  Pillow  ")
         assert get_screenshot_backend() == "pillow"
 
 
@@ -281,7 +281,7 @@ class TestMssBackend:
         fake_module, fake_sct = self._make_fake_mss(500, 400)
         monkeypatch.setattr(screenshot, "mss", fake_module)
         monkeypatch.setattr(
-            "windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
+            "agentic_windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
             lambda: (0, 0, 1920, 1080),
         )
 
@@ -298,7 +298,7 @@ class TestMssBackend:
         fake_module, _ = self._make_fake_mss(width, height)
         monkeypatch.setattr(screenshot, "mss", fake_module)
         monkeypatch.setattr(
-            "windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
+            "agentic_windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
             lambda: (0, 0, 3840, 1080),
         )
 
@@ -339,7 +339,7 @@ class TestPillowBackend:
             screenshot, "ImageGrab", MagicMock(grab=MagicMock(return_value=fake_img))
         )
         monkeypatch.setattr(
-            "windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
+            "agentic_windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
             lambda: (0, 0, 1920, 1080),
         )
 
@@ -354,7 +354,7 @@ class TestPillowBackend:
             screenshot, "ImageGrab", MagicMock(grab=MagicMock(return_value=fake_img))
         )
         monkeypatch.setattr(
-            "windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
+            "agentic_windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
             lambda: (0, 0, 3840, 1080),
         )
 
@@ -377,7 +377,7 @@ class TestPillowBackend:
 
         monkeypatch.setattr(screenshot, "ImageGrab", MagicMock(grab=fake_grab))
         monkeypatch.setattr(
-            "windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
+            "agentic_windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect",
             lambda: (0, 0, 3840, 1080),
         )
 
@@ -496,7 +496,7 @@ class TestCapture:
         assert image.size == (1920, 1080)
 
     def test_explicit_dxcam_cross_output_rect_falls_back_to_pillow(self, monkeypatch):
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", "dxcam")
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", "dxcam")
         monkeypatch.setattr(screenshot, "dxcam", MagicMock())
         monkeypatch.setattr(_DxcamBackend, "_iter_outputs", staticmethod(lambda: DXGI_OUTPUTS))
 

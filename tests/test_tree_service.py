@@ -3,17 +3,17 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from windows_mcp.desktop.views import Size
-from windows_mcp.tree.budget import TreeElementBudget
-from windows_mcp.tree.config import THREAD_MAX_RETRIES
-from windows_mcp.tree.service import (
+from agentic_windows_mcp.desktop.views import Size
+from agentic_windows_mcp.tree.budget import TreeElementBudget
+from agentic_windows_mcp.tree.config import THREAD_MAX_RETRIES
+from agentic_windows_mcp.tree.service import (
     Tree,
     _excluded_process_names,
     _is_comtypes_variant_ord_typeerror,
     _window_process_name,
 )
-from windows_mcp.tree.views import BoundingBox, SemanticNode
-from windows_mcp.uia import PropertyId, Rect
+from agentic_windows_mcp.tree.views import BoundingBox, SemanticNode
+from agentic_windows_mcp.uia import PropertyId, Rect
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ class TestComtypesVariantOrdTypeError:
 
     def test_rejects_same_message_from_non_comtypes_traceback(self):
         error = _type_error_from(
-            "C:/QA_Automation/Windows-MCP-PR/tests/helpers/fake_source.py",
+            "C:/QA_Automation/Agentic Agentic Windows MCP-PR/tests/helpers/fake_source.py",
         )
 
         assert _is_comtypes_variant_ord_typeerror(error) is False
@@ -166,14 +166,14 @@ class TestTreeTraversal:
         )
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             lambda node, cache_request: [],
         )
         monkeypatch.setattr(
-            "windows_mcp.tree.service.random_point_within_bounding_box",
+            "agentic_windows_mcp.tree.service.random_point_within_bounding_box",
             lambda node, scale_factor: (60, 35),
         )
-        monkeypatch.setattr("windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
 
         interactive_nodes = []
         tree_instance.tree_traversal(
@@ -271,10 +271,10 @@ class TestElementBudgetStopsTraversal:
             return children if node is parent else []
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             fake_get_children,
         )
-        monkeypatch.setattr("windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
 
         tree_instance.element_budget = TreeElementBudget(limit=3)
 
@@ -302,10 +302,10 @@ class TestElementBudgetStopsTraversal:
             return children if node is parent else []
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             fake_get_children,
         )
-        monkeypatch.setattr("windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
 
         tree_instance.element_budget = TreeElementBudget(limit=10)
 
@@ -335,7 +335,7 @@ class TestElementBudgetStopsTraversal:
             return children if node is parent else []
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             fake_get_children,
         )
 
@@ -373,7 +373,7 @@ class TestElementBudgetStopsTraversal:
 
         calls = []
         monkeypatch.setattr(
-            "windows_mcp.tree.service.ControlFromHandle",
+            "agentic_windows_mcp.tree.service.ControlFromHandle",
             lambda handle: MagicMock(ClassName="SomeWindow", Name="Some Window"),
         )
 
@@ -428,10 +428,10 @@ class TestCyclicRuntimeIdGuard:
             return []
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             fake_get_children,
         )
-        monkeypatch.setattr("windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
 
         interactive_nodes = []
         tree_instance.tree_traversal(
@@ -465,10 +465,10 @@ class TestCyclicRuntimeIdGuard:
             return []
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             fake_get_children,
         )
-        monkeypatch.setattr("windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
 
         interactive_nodes = []
         tree_instance.tree_traversal(
@@ -493,10 +493,10 @@ class TestCyclicRuntimeIdGuard:
             return children if node is parent else []
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
             fake_get_children,
         )
-        monkeypatch.setattr("windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"})
 
         interactive_nodes = []
         tree_instance.tree_traversal(
@@ -516,14 +516,14 @@ class TestCyclicRuntimeIdGuard:
 def _traversal_recorder(
     tree_instance, monkeypatch, process_names, excluded, forbidden_uia=frozenset()
 ):
-    """Wire the stubs shared by the `WINDOWS_MCP_EXCLUDE_PROCESSES` tests.
+    """Wire the stubs shared by the `AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES` tests.
 
     Args:
         tree_instance: The `Tree` fixture under test.
         monkeypatch: The pytest `monkeypatch` fixture.
         process_names: Mapping of HWND to the process name a lookup should report;
             a missing key resolves to None, mirroring an unresolvable owner.
-        excluded: Value for `WINDOWS_MCP_EXCLUDE_PROCESSES`, or None to leave it unset.
+        excluded: Value for `AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES`, or None to leave it unset.
         forbidden_uia: Handles whose accessibility provider must never be entered.
             Any invocation of `ControlFromHandle` for them is recorded and then
             raises.
@@ -541,9 +541,9 @@ def _traversal_recorder(
     tree_instance.desktop = live_desktop
 
     if excluded is None:
-        monkeypatch.delenv("WINDOWS_MCP_EXCLUDE_PROCESSES", raising=False)
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES", raising=False)
     else:
-        monkeypatch.setenv("WINDOWS_MCP_EXCLUDE_PROCESSES", excluded)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES", excluded)
 
     lookups = []
 
@@ -551,7 +551,7 @@ def _traversal_recorder(
         lookups.append(handle)
         return process_names.get(handle)
 
-    monkeypatch.setattr("windows_mcp.tree.service._window_process_name", fake_window_process_name)
+    monkeypatch.setattr("agentic_windows_mcp.tree.service._window_process_name", fake_window_process_name)
 
     uia_attempts = []
 
@@ -564,7 +564,7 @@ def _traversal_recorder(
             raise AssertionError(f"UIA touched excluded process (handle {handle})")
         return MagicMock(ClassName="SomeWindow", Name="Some Window")
 
-    monkeypatch.setattr("windows_mcp.tree.service.ControlFromHandle", fake_control_from_handle)
+    monkeypatch.setattr("agentic_windows_mcp.tree.service.ControlFromHandle", fake_control_from_handle)
 
     traversed = []
 
@@ -578,24 +578,24 @@ def _traversal_recorder(
 
 
 class TestExcludedProcessNames:
-    """Parsing and normalization of `WINDOWS_MCP_EXCLUDE_PROCESSES`."""
+    """Parsing and normalization of `AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES`."""
 
     def test_unset_yields_no_exclusions(self):
         assert _excluded_process_names({}) == set()
 
     def test_blank_entries_are_ignored(self):
-        assert _excluded_process_names({"WINDOWS_MCP_EXCLUDE_PROCESSES": "  ,  ,"}) == set()
+        assert _excluded_process_names({"AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES": "  ,  ,"}) == set()
 
     def test_strips_whitespace_and_casefolds(self):
         parsed = _excluded_process_names(
-            {"WINDOWS_MCP_EXCLUDE_PROCESSES": " Code.exe , CURSOR.EXE ,, "}
+            {"AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES": " Code.exe , CURSOR.EXE ,, "}
         )
 
         assert parsed == {"code.exe", "cursor.exe"}
 
     def test_duplicate_names_are_harmless(self):
         parsed = _excluded_process_names(
-            {"WINDOWS_MCP_EXCLUDE_PROCESSES": "Code.exe,code.exe,CODE.EXE"}
+            {"AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES": "Code.exe,code.exe,CODE.EXE"}
         )
 
         assert parsed == {"code.exe"}
@@ -606,18 +606,18 @@ class TestWindowProcessName:
 
     def test_returns_the_owning_process_name(self, monkeypatch):
         monkeypatch.setattr(
-            "windows_mcp.tree.service.win32process.GetWindowThreadProcessId",
+            "agentic_windows_mcp.tree.service.win32process.GetWindowThreadProcessId",
             lambda handle: (1234, 4242),
         )
         process = MagicMock()
         process.name.return_value = "Code.exe"
-        monkeypatch.setattr("windows_mcp.tree.service.Process", lambda pid: process)
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.Process", lambda pid: process)
 
         assert _window_process_name(100) == "Code.exe"
 
     def test_returns_none_without_a_pid(self, monkeypatch):
         monkeypatch.setattr(
-            "windows_mcp.tree.service.win32process.GetWindowThreadProcessId",
+            "agentic_windows_mcp.tree.service.win32process.GetWindowThreadProcessId",
             lambda handle: (1234, 0),
         )
 
@@ -628,14 +628,14 @@ class TestWindowProcessName:
             raise OSError("process is gone")
 
         monkeypatch.setattr(
-            "windows_mcp.tree.service.win32process.GetWindowThreadProcessId", explode
+            "agentic_windows_mcp.tree.service.win32process.GetWindowThreadProcessId", explode
         )
 
         assert _window_process_name(100) is None
 
 
 class TestProcessExclusion:
-    """`WINDOWS_MCP_EXCLUDE_PROCESSES` keeps UIA out of the listed processes (#383)."""
+    """`AGENTIC_WINDOWS_MCP_EXCLUDE_PROCESSES` keeps UIA out of the listed processes (#383)."""
 
     def test_unset_env_traverses_every_window_unchanged(self, tree_instance, monkeypatch):
         recorded = _traversal_recorder(
@@ -750,7 +750,7 @@ class TestProcessExclusion:
             excluded="Code.exe",
         )
         # Retries sleep between attempts; irrelevant here and slow in a test.
-        monkeypatch.setattr("windows_mcp.tree.service.sleep", lambda seconds: None)
+        monkeypatch.setattr("agentic_windows_mcp.tree.service.sleep", lambda seconds: None)
 
         def failing_get_nodes(self, handle, is_browser=False, wait_time=0, use_dom=False):
             attempts.append(handle)

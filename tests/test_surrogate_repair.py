@@ -8,8 +8,8 @@ fails over a single emoji in an element name or window title.
 
 import pytest
 
-from windows_mcp.desktop.utils import repair_surrogates
-from windows_mcp.tree.views import BoundingBox, Center, TreeElementNode, TreeState
+from agentic_windows_mcp.desktop.utils import repair_surrogates
+from agentic_windows_mcp.tree.views import BoundingBox, Center, TreeElementNode, TreeState
 
 # U+1F437 PIG FACE, as UIA hands it over: an uncombined UTF-16 surrogate pair.
 PIG_SURROGATES = "\ud83d\udc37"

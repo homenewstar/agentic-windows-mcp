@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from windows_mcp.desktop.screenshot import DxcamOutput, _DxcamBackend, _crop_screenshot  # noqa
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.desktop.views import DesktopState, Size, Status, Window, Display
-from windows_mcp.tree.views import (
+from agentic_windows_mcp.desktop.screenshot import DxcamOutput, _DxcamBackend, _crop_screenshot  # noqa
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.desktop.views import DesktopState, Size, Status, Window, Display
+from agentic_windows_mcp.tree.views import (
     BoundingBox,
     Center,
     ScrollElementNode,
@@ -15,8 +15,8 @@ from windows_mcp.tree.views import (
     TreeElementNode,
     TreeState,
 )
-from windows_mcp.uia import Rect, DisplayInfo
-import windows_mcp.__main__ as main_module
+from agentic_windows_mcp.uia import Rect, DisplayInfo
+import agentic_windows_mcp.__main__ as main_module
 
 
 def make_box(left: int, top: int, right: int, bottom: int) -> BoundingBox:
@@ -60,7 +60,7 @@ class TestParseRegionSelection:
     @pytest.fixture(autouse=True)
     def _virtual_screen(self):
         with patch(
-            "windows_mcp.desktop.service.uia.GetVirtualScreenRect",
+            "agentic_windows_mcp.desktop.service.uia.GetVirtualScreenRect",
             return_value=(0, 0, 1920, 1080),
         ):
             yield
@@ -254,17 +254,17 @@ class TestDisplayFiltering:
 
     def test_crop_screenshot_to_display_region(self, desktop):
         screenshot = Image.new("RGB", (3840, 1080), "white")
-        with patch("windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect") as mock_virtual_rect:
+        with patch("agentic_windows_mcp.desktop.screenshot.uia.GetVirtualScreenRect") as mock_virtual_rect:
             mock_virtual_rect.return_value = (0, 0, 3840, 1080)
             cropped = _crop_screenshot(screenshot, Rect(1920, 0, 3840, 1080))
         assert cropped.size == (1920, 1080)
 
     def test_get_screenshot_uses_display_bbox_for_direct_capture(self, desktop):
         capture_rect = Rect(1920, 0, 3840, 1080)
-        with patch("windows_mcp.desktop.screenshot.dxcam", None):
-            with patch("windows_mcp.desktop.screenshot.ImageGrab.grab") as mock_grab:
+        with patch("agentic_windows_mcp.desktop.screenshot.dxcam", None):
+            with patch("agentic_windows_mcp.desktop.screenshot.ImageGrab.grab") as mock_grab:
                 with patch(
-                    "windows_mcp.desktop.screenshot.get_screenshot_backend"
+                    "agentic_windows_mcp.desktop.screenshot.get_screenshot_backend"
                 ) as mock_screenshot_backend:
                     mock_grab.return_value = Image.new("RGB", (1920, 1080), "white")
                     mock_screenshot_backend.return_value = (
@@ -284,11 +284,11 @@ class TestDisplayFiltering:
         fake_dxcam = MagicMock()
         fake_dxcam.create.return_value = fake_camera
 
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", "dxcam")
-        monkeypatch.setattr("windows_mcp.desktop.screenshot.dxcam", fake_dxcam)
-        monkeypatch.setattr("windows_mcp.desktop.screenshot._backend_instances", {})
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", "dxcam")
+        monkeypatch.setattr("agentic_windows_mcp.desktop.screenshot.dxcam", fake_dxcam)
+        monkeypatch.setattr("agentic_windows_mcp.desktop.screenshot._backend_instances", {})
         monkeypatch.setattr(
-            "windows_mcp.desktop.service.uia.GetDisplays",
+            "agentic_windows_mcp.desktop.service.uia.GetDisplays",
             lambda: [
                 DisplayInfo(
                     index=0,
@@ -316,7 +316,7 @@ class TestDisplayFiltering:
         )
         capture_rect = desktop.get_display_union_rect([1])
         with patch(
-            "windows_mcp.desktop.screenshot.Image.fromarray",
+            "agentic_windows_mcp.desktop.screenshot.Image.fromarray",
             return_value=Image.new("RGB", (1, 1), "white"),
         ) as mock_fromarray:
             screenshot = desktop.get_screenshot(capture_rect=capture_rect)
@@ -336,8 +336,8 @@ class TestDisplayFiltering:
         capture_rect = Rect(0, 0, 3840, 1080)
         fake_dxcam = MagicMock()
 
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", "dxcam")
-        monkeypatch.setattr("windows_mcp.desktop.screenshot.dxcam", fake_dxcam)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", "dxcam")
+        monkeypatch.setattr("agentic_windows_mcp.desktop.screenshot.dxcam", fake_dxcam)
         monkeypatch.setattr(
             _DxcamBackend,
             "_iter_outputs",
@@ -348,7 +348,7 @@ class TestDisplayFiltering:
                 ]
             ),
         )
-        with patch("windows_mcp.desktop.screenshot.ImageGrab.grab") as mock_grab:
+        with patch("agentic_windows_mcp.desktop.screenshot.ImageGrab.grab") as mock_grab:
             mock_grab.return_value = Image.new("RGB", (3840, 1080), "white")
             screenshot = desktop.get_screenshot(capture_rect=capture_rect)
 
@@ -371,9 +371,9 @@ class TestDisplayFiltering:
         )
         fake_mss_module = MagicMock(mss=MagicMock(return_value=fake_mss_ctx))
 
-        monkeypatch.setenv("WINDOWS_MCP_SCREENSHOT_BACKEND", "auto")
-        monkeypatch.setattr("windows_mcp.desktop.screenshot.dxcam", None)
-        monkeypatch.setattr("windows_mcp.desktop.screenshot.mss", fake_mss_module)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND", "auto")
+        monkeypatch.setattr("agentic_windows_mcp.desktop.screenshot.dxcam", None)
+        monkeypatch.setattr("agentic_windows_mcp.desktop.screenshot.mss", fake_mss_module)
         screenshot = desktop.get_screenshot(capture_rect=capture_rect)
 
         assert screenshot.size == (1920, 1080)
@@ -384,7 +384,7 @@ class TestDisplayFiltering:
         with patch.object(
             desktop, "get_screenshot", return_value=screenshot
         ) as mock_get_screenshot:
-            with patch("windows_mcp.desktop.service.uia.GetVirtualScreenRect") as mock_virtual_rect:
+            with patch("agentic_windows_mcp.desktop.service.uia.GetVirtualScreenRect") as mock_virtual_rect:
                 mock_virtual_rect.return_value = (0, 0, 3840, 1080)
                 annotated = desktop.get_annotated_screenshot(
                     nodes=[],
@@ -409,7 +409,7 @@ class TestDisplayFiltering:
         )
 
         with patch.object(desktop, "get_screenshot", return_value=screenshot):
-            with patch("windows_mcp.desktop.service.random.randint", return_value=0):
+            with patch("agentic_windows_mcp.desktop.service.random.randint", return_value=0):
                 annotated = desktop.get_annotated_screenshot(
                     nodes=[node],
                     capture_rect=Rect(1920, 0, 3840, 1080),
@@ -421,7 +421,7 @@ class TestDisplayFiltering:
     def test_annotation_keeps_full_desktop_screenshot_size(self, desktop):
         screenshot = Image.new("RGB", (3840, 1080), "white")
         with patch.object(desktop, "get_screenshot", return_value=screenshot):
-            with patch("windows_mcp.desktop.service.uia.GetVirtualScreenRect") as mock_virtual_rect:
+            with patch("agentic_windows_mcp.desktop.service.uia.GetVirtualScreenRect") as mock_virtual_rect:
                 mock_virtual_rect.return_value = (0, 0, 3840, 1080)
                 annotated = desktop.get_annotated_screenshot(nodes=[])
 
@@ -439,8 +439,8 @@ class TestDisplayFiltering:
         )
 
         with patch.object(desktop, "get_screenshot", return_value=screenshot):
-            with patch("windows_mcp.desktop.service.uia.GetVirtualScreenRect") as mock_virtual_rect:
-                with patch("windows_mcp.desktop.service.random.randint", return_value=0):
+            with patch("agentic_windows_mcp.desktop.service.uia.GetVirtualScreenRect") as mock_virtual_rect:
+                with patch("agentic_windows_mcp.desktop.service.random.randint", return_value=0):
                     mock_virtual_rect.return_value = (0, 0, 40, 30)
                     annotated = desktop.get_annotated_screenshot(nodes=[node])
 
@@ -516,10 +516,10 @@ class TestDisplayFiltering:
         desktop.get_cursor_location = MagicMock(return_value=(-1000, 500))
 
         with patch(
-            "windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
+            "agentic_windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
         ):
             with patch(
-                "windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
+                "agentic_windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
             ):
                 state = desktop.get_state(
                     use_vision=False,
@@ -553,10 +553,10 @@ class TestDisplayFiltering:
         desktop.get_screenshot = MagicMock(return_value=Image.new("RGB", (800, 600), "white"))
 
         with patch(
-            "windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
+            "agentic_windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
         ):
             with patch(
-                "windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
+                "agentic_windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
             ):
                 state = desktop.get_state(
                     use_vision=True,
@@ -630,10 +630,10 @@ class TestDisplayFiltering:
         desktop.get_cursor_location = MagicMock(return_value=(150, 150))
 
         with patch(
-            "windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
+            "agentic_windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
         ):
             with patch(
-                "windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
+                "agentic_windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
             ):
                 # display=[0] (left monitor) would select (0,0,1920,1080); region overrides it
                 # with a small rectangle on the right monitor instead.
@@ -682,17 +682,17 @@ class TestDisplayFiltering:
         desktop.get_cursor_location = MagicMock(return_value=(250, 180))
         logged: list[str] = []
 
-        monkeypatch.setenv("WINDOWS_MCP_PROFILE_SNAPSHOT", "1")
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_PROFILE_SNAPSHOT", "1")
         monkeypatch.setattr(
-            "windows_mcp.desktop.service.logger.info",
+            "agentic_windows_mcp.desktop.service.logger.info",
             lambda message, *args: logged.append(message % args if args else message),
         )
 
         with patch(
-            "windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
+            "agentic_windows_mcp.desktop.service.get_current_desktop", return_value={"name": "Desktop 1"}
         ):
             with patch(
-                "windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
+                "agentic_windows_mcp.desktop.service.get_all_desktops", return_value=[{"name": "Desktop 1"}]
             ):
                 desktop.get_state(
                     use_vision=False,

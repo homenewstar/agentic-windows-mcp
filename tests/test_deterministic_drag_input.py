@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 import pytest
 
-from windows_mcp.tools.input import register
+from agentic_windows_mcp.tools.input import register
 
 
 class FakeMCP:

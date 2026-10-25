@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from windows_mcp.desktop.control import ControlBlocked, ControlCoordinator
-from windows_mcp.desktop.control_context import current_request_closed, current_token
-from windows_mcp.infrastructure.thread_affinity import run_uia_affine
-from windows_mcp.tools.control_notifications import ControlToolGate
+from agentic_windows_mcp.desktop.control import ControlBlocked, ControlCoordinator
+from agentic_windows_mcp.desktop.control_context import current_request_closed, current_token
+from agentic_windows_mcp.infrastructure.thread_affinity import run_uia_affine
+from agentic_windows_mcp.tools.control_notifications import ControlToolGate
 
 
 def make_gate():
@@ -124,7 +124,7 @@ async def test_all_exits_revoke_before_releasing_lease(ending):
 async def test_mcp_client_termination_revokes_running_worker(ending):
     """Use the real MCP in-memory transport; only desktop effects are simulated."""
     from fastmcp import Client, FastMCP
-    from windows_mcp.infrastructure.analytics import with_analytics
+    from agentic_windows_mcp.infrastructure.analytics import with_analytics
 
     owner, gate, _ = make_gate()
     mcp = FastMCP("request-lifetime")

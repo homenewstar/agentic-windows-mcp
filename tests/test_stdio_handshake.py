@@ -1,7 +1,7 @@
 """End-to-end stdio transport tests against a real server subprocess.
 
 Every other test in this suite calls tool functions in-process, which skips
-the MCP lifecycle entirely. These tests spawn ``windows-mcp serve`` over a
+the MCP lifecycle entirely. These tests spawn ``agentic-windows-mcp serve`` over a
 real stdio pipe and drive it the way a client does, so they cover the layer
 in between: the initialize handshake, JSON-RPC framing, and the advertised
 tool surface.
@@ -71,7 +71,7 @@ EXPECTED_TOOLS = {
 # fast rather than hang the run.
 STARTUP_TIMEOUT = 60.0
 
-SERVER_ARGS = ["-m", "windows_mcp", "serve", "--transport", "stdio"]
+SERVER_ARGS = ["-m", "agentic_windows_mcp", "serve", "--transport", "stdio"]
 
 
 def _server_env() -> dict[str, str]:
@@ -82,7 +82,7 @@ def _server_env() -> dict[str, str]:
     """
     return os.environ | {
         "ANONYMIZED_TELEMETRY": "false",
-        "WINDOWS_MCP_WATCHDOG": "off",
+        "AGENTIC_WINDOWS_MCP_WATCHDOG": "off",
     }
 
 

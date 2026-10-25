@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-import windows_mcp.desktop.flash_overlay as flash_overlay
+import agentic_windows_mcp.desktop.flash_overlay as flash_overlay
 
 
 @pytest.fixture(autouse=True)
@@ -36,17 +36,17 @@ def _reset_active_overlay():
 
 class TestFlashDisabled:
     def test_default_is_enabled(self, monkeypatch):
-        monkeypatch.delenv("WINDOWS_MCP_DISABLE_FLASH", raising=False)
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", raising=False)
         assert flash_overlay._flash_disabled() is False
 
     @pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", " On "])
     def test_truthy_values_disable(self, monkeypatch, value):
-        monkeypatch.setenv("WINDOWS_MCP_DISABLE_FLASH", value)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", value)
         assert flash_overlay._flash_disabled() is True
 
     @pytest.mark.parametrize("value", ["0", "false", "no", "off", ""])
     def test_falsy_values_keep_enabled(self, monkeypatch, value):
-        monkeypatch.setenv("WINDOWS_MCP_DISABLE_FLASH", value)
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", value)
         assert flash_overlay._flash_disabled() is False
 
 
@@ -71,7 +71,7 @@ class _FakeRect:
 
 class TestShowCaptureFlash:
     def test_disabled_env_var_skips_thread(self, monkeypatch):
-        monkeypatch.setenv("WINDOWS_MCP_DISABLE_FLASH", "1")
+        monkeypatch.setenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", "1")
         with patch.object(threading, "Thread") as fake_thread:
             flash_overlay.show_capture_flash(_FakeRect(0, 0, 100, 100))
         fake_thread.assert_not_called()
@@ -79,20 +79,20 @@ class TestShowCaptureFlash:
 
     def test_empty_monitor_rects_skips_thread(self, monkeypatch):
         """Full-screen path with zero monitors must not start a thread."""
-        monkeypatch.delenv("WINDOWS_MCP_DISABLE_FLASH", raising=False)
-        # Patch on the real uia module — ``import windows_mcp.uia as uia`` resolves
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", raising=False)
+        # Patch on the real uia module — ``import agentic_windows_mcp.uia as uia`` resolves
         # via the cached parent-package attribute once another test has imported
         # the package, so monkeypatching sys.modules is not reliable on its own.
-        import windows_mcp.uia
+        import agentic_windows_mcp.uia
 
-        monkeypatch.setattr(windows_mcp.uia, "GetMonitorsRect", lambda: [])
+        monkeypatch.setattr(agentic_windows_mcp.uia, "GetMonitorsRect", lambda: [])
         with patch.object(threading, "Thread") as fake_thread:
             flash_overlay.show_capture_flash(None)
         fake_thread.assert_not_called()
         assert flash_overlay._active_overlay is None
 
     def test_region_capture_passes_single_rect(self, monkeypatch):
-        monkeypatch.delenv("WINDOWS_MCP_DISABLE_FLASH", raising=False)
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", raising=False)
 
         captured = {}
 
@@ -112,7 +112,7 @@ class TestShowCaptureFlash:
 
         assert captured["started"] is True
         assert captured["daemon"] is True
-        assert captured["name"] == "windows-mcp-flash"
+        assert captured["name"] == "agentic-windows-mcp-flash"
         assert flash_overlay._active_overlay is not None
         rects_arg, full_screen_arg, overlay_arg = captured["args"]
         assert rects_arg == [(10, 20, 110, 120)]
@@ -155,11 +155,11 @@ class TestShowCaptureFlash:
 
     def test_full_screen_capture_enumerates_monitors(self, monkeypatch):
         """When capture_rect is None the helper must read uia.GetMonitorsRect."""
-        monkeypatch.delenv("WINDOWS_MCP_DISABLE_FLASH", raising=False)
-        import windows_mcp.uia
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", raising=False)
+        import agentic_windows_mcp.uia
 
         monkeypatch.setattr(
-            windows_mcp.uia,
+            agentic_windows_mcp.uia,
             "GetMonitorsRect",
             lambda: [_FakeRect(0, 0, 1920, 1080), _FakeRect(1920, 0, 3840, 1080)],
         )
@@ -183,7 +183,7 @@ class TestShowCaptureFlash:
 
     def test_overlapping_calls_cancel_prior_overlay(self, monkeypatch):
         """Second call must signal the prior overlay's stop_event so it can be torn down."""
-        monkeypatch.delenv("WINDOWS_MCP_DISABLE_FLASH", raising=False)
+        monkeypatch.delenv("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", raising=False)
 
         class _StubThread:
             def __init__(self, *a, **kw):

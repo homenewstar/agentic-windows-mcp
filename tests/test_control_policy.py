@@ -8,10 +8,10 @@ from unittest.mock import Mock
 import pytest
 from fastmcp import Client, FastMCP
 
-from windows_mcp.desktop.control import ControlCoordinator
-from windows_mcp.tools import register_all
-from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
-from windows_mcp.tools.control_policy import CLASSIFIED_TOOLS, MODES, requires_control
+from agentic_windows_mcp.desktop.control import ControlCoordinator
+from agentic_windows_mcp.tools import register_all
+from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+from agentic_windows_mcp.tools.control_policy import CLASSIFIED_TOOLS, MODES, requires_control
 
 
 @pytest.mark.parametrize("policy", ["relaxed", "balanced", "strict"])

@@ -7,7 +7,7 @@ from tests.test_multi_tools import FakeMCP, make_desktop_with_tree_state
 
 
 def _input_tools(desktop):
-    from windows_mcp.tools.input import register
+    from agentic_windows_mcp.tools.input import register
 
     mcp = FakeMCP()
     register(mcp, get_desktop=lambda: desktop, get_analytics=lambda: None)

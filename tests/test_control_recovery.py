@@ -5,8 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from windows_mcp.desktop import control
-from windows_mcp.desktop.control_recovery import StaleInputRecovery
+from agentic_windows_mcp.desktop import control
+from agentic_windows_mcp.desktop.control_recovery import StaleInputRecovery
 
 
 @pytest.fixture
@@ -390,7 +390,7 @@ def test_takeover_chord_queued_at_lease_expiry_does_not_latch(
     clock[0] = owner._lease_until - 0.01
     owner._deadline = clock[0] + 1  # Simulate a healthy watchdog heartbeat.
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 0)
-    keys = (0xA2, 0xA4, 0xA0, 0x08)
+    keys = (0xA2, 0xA4, 0xA0, 0x20)
 
     def key(vk, down):
         event = control._KeyHookData()

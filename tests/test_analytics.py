@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from windows_mcp.infrastructure import PostHogAnalytics, with_analytics
+from agentic_windows_mcp.infrastructure import PostHogAnalytics, with_analytics
 
 
 class TestWithAnalytics:
@@ -93,7 +93,7 @@ class TestPostHogAnalytics:
         )
         user_data_dir.mkdir()
         try:
-            user_id_file = user_data_dir / ".windows-mcp-user-id"
+            user_id_file = user_data_dir / ".agentic-windows-mcp-user-id"
             user_id_file.write_text("persisted-user", encoding="utf-8")
 
             analytics = PostHogAnalytics.__new__(PostHogAnalytics)

@@ -11,7 +11,7 @@ from __future__ import annotations
 import threading
 import time
 
-from windows_mcp.desktop import control_worker
+from agentic_windows_mcp.desktop import control_worker
 
 
 class _Ledger:

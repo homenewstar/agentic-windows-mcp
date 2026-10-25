@@ -1,4 +1,4 @@
-from windows_mcp.desktop.utils import remove_private_use_chars
+from agentic_windows_mcp.desktop.utils import remove_private_use_chars
 
 
 class TestRemovePrivateUseChars:

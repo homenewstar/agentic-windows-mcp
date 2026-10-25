@@ -5,7 +5,7 @@ Covers the pieces of the change:
     to the v1 CUIAutomation client when that fails;
   * ERROR_TIMEOUT (0x800705B4) is a typed UIATimeoutError, and is_timeout_exception() recognises
     both typed and raw COMError timeouts;
-  * WINDOWS_MCP_UIA_*_TIMEOUT_MS parsing;
+  * AGENTIC_WINDOWS_MCP_UIA_*_TIMEOUT_MS parsing;
   * Tree.get_window_wise_nodes() reports a timed-out window as failed after ONE attempt, without
     the backoff retries and without the extra ControlFromHandle(...).Name lookup;
   * CachedControlHelper.get_cached_children() does not pay a timeout twice via its uncached fallback;
@@ -18,7 +18,7 @@ from unittest import mock
 
 from _ctypes import COMError
 
-from windows_mcp.uia import (
+from agentic_windows_mcp.uia import (
     UIAError,
     UIADeadElementError,
     UIATimeoutError,
@@ -26,16 +26,16 @@ from windows_mcp.uia import (
     is_timeout_error,
     is_timeout_exception,
 )
-from windows_mcp.uia import core as uia_core
-from windows_mcp.uia.core import (
+from agentic_windows_mcp.uia import core as uia_core
+from agentic_windows_mcp.uia.core import (
     DEFAULT_UIA_CONNECTION_TIMEOUT_MS,
     DEFAULT_UIA_TRANSACTION_TIMEOUT_MS,
     _uia_timeout_ms,
 )
-from windows_mcp.tree import service as tree_service
-from windows_mcp.tree.budget import TreeElementBudget
-from windows_mcp.tree.cache_utils import CachedControlHelper
-from windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.tree import service as tree_service
+from agentic_windows_mcp.tree.budget import TreeElementBudget
+from agentic_windows_mcp.tree.cache_utils import CachedControlHelper
+from agentic_windows_mcp.desktop.service import Desktop
 
 ERROR_TIMEOUT = -2147023436  # 0x800705B4
 
@@ -101,7 +101,7 @@ def test_client_uses_cuiautomation8_with_configured_timeouts():
         created.append((progid, interface))
         return SimpleNamespace(ConnectionTimeout=None, TransactionTimeout=None)
 
-    env = {"WINDOWS_MCP_UIA_CONNECTION_TIMEOUT_MS": "1500", "WINDOWS_MCP_UIA_TRANSACTION_TIMEOUT_MS": "7000"}
+    env = {"AGENTIC_WINDOWS_MCP_UIA_CONNECTION_TIMEOUT_MS": "1500", "AGENTIC_WINDOWS_MCP_UIA_TRANSACTION_TIMEOUT_MS": "7000"}
     with mock.patch.object(uia_core.comtypes.client, "CreateObject", create_object), \
             mock.patch.dict(os.environ, env):
         client = _bare_client()._create_client()

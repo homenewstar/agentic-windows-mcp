@@ -1,10 +1,10 @@
 import asyncio
 from unittest.mock import MagicMock
 
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.desktop.views import DesktopState
-from windows_mcp.tree.views import BoundingBox, Center, ScrollElementNode, TreeElementNode, TreeState
-from windows_mcp.tools.multi import register
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.desktop.views import DesktopState
+from agentic_windows_mcp.tree.views import BoundingBox, Center, ScrollElementNode, TreeElementNode, TreeState
+from agentic_windows_mcp.tools.multi import register
 
 
 class FakeMCP:

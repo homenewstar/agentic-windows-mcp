@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "windows_mcp"
+SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "agentic_windows_mcp"
 
 # Enclosing functions exempted wholesale. Keyed by name rather than line
 # number so the allowlist survives edits elsewhere in the file.

@@ -1,6 +1,6 @@
 import pytest
 
-from windows_mcp.uia import core
+from agentic_windows_mcp.uia import core
 
 
 def test_dragdrop_releases_mouse_after_move_failure(monkeypatch: pytest.MonkeyPatch) -> None:

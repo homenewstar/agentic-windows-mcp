@@ -11,9 +11,9 @@ from collections.abc import Callable
 
 import pytest
 
-from windows_mcp.desktop import service
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.tools.input import register
+from agentic_windows_mcp.desktop import service
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.tools.input import register
 
 # A single 1920x1080 monitor.
 SINGLE_MONITOR = (0, 0, 1920, 1080)

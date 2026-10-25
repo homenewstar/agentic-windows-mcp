@@ -1,4 +1,4 @@
-"""`windows-mcp install` must not leave a visible console window open at logon.
+"""`agentic-windows-mcp install` must not leave a visible console window open at logon.
 
 A scheduled task whose action executes a .cmd directly gets a visible console
 (a Windows Terminal window on Windows 11) for the lifetime of the server. The task
@@ -7,7 +7,7 @@ action must go through ``conhost.exe --headless`` instead.
 
 import subprocess
 
-import windows_mcp.__main__ as cli
+import agentic_windows_mcp.__main__ as cli
 
 
 def test_task_action_uses_headless_conhost(monkeypatch):
@@ -18,8 +18,8 @@ def test_task_action_uses_headless_conhost(monkeypatch):
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
-    script = r"C:\Users\me\.windows-mcp\start-server.cmd"
-    cli._register_task_powershell("Windows-MCP", script)
+    script = r"C:\Users\me\.agentic-windows-mcp\start-server.cmd"
+    cli._register_task_powershell("Agentic Agentic Windows MCP", script)
 
     ps = captured["args"][-1]
     assert "-Execute 'conhost.exe'" in ps
@@ -28,5 +28,5 @@ def test_task_action_uses_headless_conhost(monkeypatch):
 
 
 def test_headless_argument_quotes_paths_with_spaces():
-    arg = cli._headless_task_argument(r"C:\Users\John Doe\.windows-mcp\start-server.cmd")
-    assert arg == r'--headless cmd.exe /c "C:\Users\John Doe\.windows-mcp\start-server.cmd"'
+    arg = cli._headless_task_argument(r"C:\Users\John Doe\.agentic-windows-mcp\start-server.cmd")
+    assert arg == r'--headless cmd.exe /c "C:\Users\John Doe\.agentic-windows-mcp\start-server.cmd"'

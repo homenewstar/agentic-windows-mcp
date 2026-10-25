@@ -13,8 +13,8 @@ import types
 
 import pytest
 
-from windows_mcp.watchdog import service as watchdog_service
-from windows_mcp.watchdog.service import MAX_BACKOFF_SECONDS, WatchDog
+from agentic_windows_mcp.watchdog import service as watchdog_service
+from agentic_windows_mcp.watchdog.service import MAX_BACKOFF_SECONDS, WatchDog
 
 
 @pytest.fixture

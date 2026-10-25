@@ -1,15 +1,15 @@
 {
   "manifest_version": "0.4",
-  "name": "Windows-MCP",
+  "name": "Agentic Agentic Windows MCP",
   "version": "0.8.8",
   "description": "MCP Server that enables Claude to interact with Windows OS",
-  "long_description": "Windows-MCP is an open-source project that enables seamless integration between AI agents and the Windows operating system. Acting as an MCP server, it bridges the gap between large language models (LLMs) and the Windows OS, allowing agents to perform tasks such as **file navigation, application control, UI interaction, QA testing, and more**.\n\n**KEY FEATURES**\n- **Seamless Windows Integration**: Interacts natively with Windows UI elements, opens applications, controls windows, simulates user input, and more.\n- **Use Any LLM (Vision Optional)**: Does not rely on traditional computer vision techniques or fine-tuned models. Works with any LLM, reducing complexity and setup time.\n- **Rich Toolset for UI Automation**: Includes tools for keyboard and mouse control, window management, and capturing window or UI state.\n- **Lightweight & Open-Source**: Minimal dependencies with full source code available under the MIT license.\n- **Customizable & Extendable**: Easily adapt or extend tools to suit custom automation workflows or AI integrations.\n- **Real-Time Interaction**: Typical latency between actions ranges from `0.2` to `0.9` seconds, depending on system load, active applications, and LLM inference speed.\n\n**MINIMUM REQUIREMENTS**\n- **Python 3.14+**\n",
+  "long_description": "Agentic Agentic Windows MCP is an open-source project that enables seamless integration between AI agents and the Windows operating system. Acting as an MCP server, it bridges the gap between large language models (LLMs) and the Windows OS, allowing agents to perform tasks such as **file navigation, application control, UI interaction, QA testing, and more**.\n\n**KEY FEATURES**\n- **Seamless Windows Integration**: Interacts natively with Windows UI elements, opens applications, controls windows, simulates user input, and more.\n- **Use Any LLM (Vision Optional)**: Does not rely on traditional computer vision techniques or fine-tuned models. Works with any LLM, reducing complexity and setup time.\n- **Rich Toolset for UI Automation**: Includes tools for keyboard and mouse control, window management, and capturing window or UI state.\n- **Lightweight & Open-Source**: Minimal dependencies with full source code available under the MIT license.\n- **Customizable & Extendable**: Easily adapt or extend tools to suit custom automation workflows or AI integrations.\n- **Real-Time Interaction**: Typical latency between actions ranges from `0.2` to `0.9` seconds, depending on system load, active applications, and LLM inference speed.\n\n**MINIMUM REQUIREMENTS**\n- **Python 3.14+**\n",
   "author": {
-    "name": "CursorTouch",
-    "url": "https://cursortouch.com/"
+    "name": "Vu Manh Ruy",
+    "url": "https://github.com/homenewstar/"
   },
-  "homepage": "https://cursortouch.com/",
-  "documentation": "https://github.com/CursorTouch/Windows-MCP",
+  "homepage": "https://github.com/homenewstar/",
+  "documentation": "https://github.com/homenewstar/agentic-agentic-windows-mcp",
   "icon": "assets/logo.png",
   "screenshots": [
     "assets/screenshots/screenshot_1.png",
@@ -18,7 +18,7 @@
   ],
   "server": {
     "type": "uv",
-    "entry_point": "src/windows_mcp/__main__.py",
+    "entry_point": "src/agentic_windows_mcp/__main__.py",
     "mcp_config": {
       "command": "uv",
       "args": [
@@ -27,17 +27,17 @@
         "run",
         "python",
         "-m",
-        "windows_mcp",
+        "agentic_windows_mcp",
         "serve"
       ],
       "env": {
         "UV_NO_SYNC": "1",
         "UV_CACHE_DIR": "${__dirname}/.uv-cache",
         "ANONYMIZED_TELEMETRY": "${user_config.anonymized_telemetry}",
-        "WINDOWS_MCP_PROFILE_SNAPSHOT": "${user_config.profile_snapshot}",
-        "WINDOWS_MCP_SCREENSHOT_BACKEND": "${user_config.screenshot_backend}",
-        "WINDOWS_MCP_DEBUG": "${user_config.debug}",
-        "WINDOWS_MCP_WATCHDOG": "${user_config.watchdog}"
+        "AGENTIC_WINDOWS_MCP_PROFILE_SNAPSHOT": "${user_config.profile_snapshot}",
+        "AGENTIC_WINDOWS_MCP_SCREENSHOT_BACKEND": "${user_config.screenshot_backend}",
+        "AGENTIC_WINDOWS_MCP_DEBUG": "${user_config.debug}",
+        "AGENTIC_WINDOWS_MCP_WATCHDOG": "${user_config.watchdog}"
       }
     }
   },
@@ -45,7 +45,7 @@
     "anonymized_telemetry": {
       "type": "boolean",
       "title": "Anonymized Telemetry",
-      "description": "Windows-MCP collects basic usage data to help improve the MCP server. No personal information, tool arguments, or tool outputs are tracked.",
+      "description": "Agentic Agentic Windows MCP collects basic usage data to help improve the MCP server. No personal information, tool arguments, or tool outputs are tracked.",
       "required": false,
       "default": true
     },
@@ -182,6 +182,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CursorTouch/Windows-MCP"
+    "url": "https://github.com/homenewstar/agentic-agentic-windows-mcp"
   }
 }

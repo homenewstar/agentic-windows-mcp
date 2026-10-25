@@ -1812,7 +1812,7 @@ wheels = [
 ]
 
 [[package]]
-name = "windows-mcp"
+name = "agentic-windows-mcp"
 version = "0.8.8"
 source = { editable = "." }
 dependencies = [

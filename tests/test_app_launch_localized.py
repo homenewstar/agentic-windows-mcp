@@ -3,8 +3,8 @@ import sys
 import pytest
 
 if sys.platform == "win32":
-    from windows_mcp.desktop.service import Desktop
-    from windows_mcp.powershell import PowerShellExecutor
+    from agentic_windows_mcp.desktop.service import Desktop
+    from agentic_windows_mcp.powershell import PowerShellExecutor
 else:
     pytestmark = pytest.mark.skip(reason="Desktop imports Windows-only pywin32 modules")
 

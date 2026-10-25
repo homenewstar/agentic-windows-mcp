@@ -8,8 +8,8 @@ lands on target while the preceding SetCursorPos happens to succeed.
 
 import pytest
 
-from windows_mcp.uia import core
-from windows_mcp.uia.enums import MouseEventFlag
+from agentic_windows_mcp.uia import core
+from agentic_windows_mcp.uia.enums import MouseEventFlag
 
 # A single 3840x2160 monitor.
 SINGLE_MONITOR = (0, 0, 3840, 2160)

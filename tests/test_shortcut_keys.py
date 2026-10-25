@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import windows_mcp.desktop.service as service
-from windows_mcp.desktop.service import Desktop, _shortcut_to_sendkeys
+import agentic_windows_mcp.desktop.service as service
+from agentic_windows_mcp.desktop.service import Desktop, _shortcut_to_sendkeys
 
 
 @pytest.mark.parametrize(

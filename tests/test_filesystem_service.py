@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from windows_mcp.filesystem.service import (
+from agentic_windows_mcp.filesystem.service import (
     read_file,
     write_file,
     copy_path,

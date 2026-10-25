@@ -1,8 +1,8 @@
 from unittest.mock import patch
 
-from windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.desktop.service import Desktop
 
-SERVICE = "windows_mcp.desktop.service"
+SERVICE = "agentic_windows_mcp.desktop.service"
 
 
 def _handles(owner_pids, own_pid=4242):

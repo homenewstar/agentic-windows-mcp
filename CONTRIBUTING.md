@@ -1,6 +1,6 @@
-# Contributing to Windows-MCP
+# Contributing to Agentic Agentic Windows MCP
 
-Thank you for your interest in contributing to Windows-MCP! We welcome contributions from the community to help make this project better. This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Agentic Agentic Windows MCP! We welcome contributions from the community to help make this project better. This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -50,19 +50,19 @@ Before you begin, ensure you have:
 
 1. **Fork the Repository**
    
-   Click the "Fork" button on the [Windows-MCP repository](https://github.com/CursorTouch/Windows-MCP) to create your own copy.
+   Click the "Fork" button on the [Agentic Agentic Windows MCP repository](https://github.com/homenewstar/agentic-agentic-windows-mcp) to create your own copy.
 
 2. **Clone Your Fork**
    
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Windows-MCP.git
-   cd Windows-MCP
+   git clone https://github.com/YOUR_USERNAME/Agentic Agentic Windows MCP.git
+   cd Agentic Agentic Windows MCP
    ```
 
 3. **Add Upstream Remote**
    
    ```bash
-   git remote add upstream https://github.com/CursorTouch/Windows-MCP.git
+   git remote add upstream https://github.com/homenewstar/agentic-agentic-windows-mcp.git
    ```
 
 4. **Install Dependencies**
@@ -74,7 +74,7 @@ Before you begin, ensure you have:
 5. **Verify Installation**
    
    ```bash
-   uv run windows-mcp --help
+   uv run agentic-windows-mcp --help
    ```
 
 ## Development Workflow
@@ -255,7 +255,7 @@ def test_click_tool_validates_coordinates():
 
 3. **Create Pull Request**
    
-   - Go to the [Windows-MCP repository](https://github.com/CursorTouch/Windows-MCP)
+   - Go to the [Agentic Agentic Windows MCP repository](https://github.com/homenewstar/agentic-agentic-windows-mcp)
    - Click "New Pull Request"
    - Select your fork and branch
    - Fill out the PR template with:
@@ -300,7 +300,7 @@ Update relevant documentation files:
 
 When adding or modifying tools:
 
-1. Update the tool's `description` parameter in its module under `src/windows_mcp/tools/`
+1. Update the tool's `description` parameter in its module under `src/agentic_windows_mcp/tools/`
 2. Add appropriate `ToolAnnotations`
 3. Update the tools list in `README.md`
 4. Update `manifest.json` if needed
@@ -332,8 +332,8 @@ Include:
 **DO NOT** report security vulnerabilities through public GitHub issues.
 
 Instead, please:
-1. Email the maintainers at [jeogeoalukka@gmail.com](mailto:jeogeoalukka@gmail.com)
-2. Or use [GitHub Security Advisories](https://github.com/CursorTouch/Windows-MCP/security/advisories)
+1. Email the maintainers at [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new)
+2. Or use [GitHub Security Advisories](https://github.com/homenewstar/agentic-agentic-windows-mcp/security/advisories)
 
 See our [Security Policy](SECURITY.md) for more details.
 
@@ -342,8 +342,8 @@ See our [Security Policy](SECURITY.md) for more details.
 Need help with your contribution?
 
 - **Discord**: Join our [Discord Community](https://discord.com/invite/Aue9Yj2VzS)
-- **Twitter/X**: Follow [@CursorTouch](https://x.com/CursorTouch)
-- **GitHub Discussions**: Ask questions in [Discussions](https://github.com/CursorTouch/Windows-MCP/discussions)
+- **Twitter/X**: Follow [@Vu Manh Ruy](https://x.com/Vu Manh Ruy)
+- **GitHub Discussions**: Ask questions in [Discussions](https://github.com/homenewstar/agentic-agentic-windows-mcp/discussions)
 - **Issues**: Open an issue for technical questions
 
 ## Types of Contributions
@@ -375,10 +375,10 @@ Contributors are recognized in:
 
 ## License
 
-By contributing to Windows-MCP, you agree that your contributions will be licensed under the [MIT License](LICENSE.md).
+By contributing to Agentic Agentic Windows MCP, you agree that your contributions will be licensed under the [MIT License](LICENSE.md).
 
 ---
 
-Thank you for contributing to Windows-MCP! Your efforts help make this project better for everyone. 🙏
+Thank you for contributing to Agentic Agentic Windows MCP! Your efforts help make this project better for everyone. 🙏
 
-Made with ❤️ by the CursorTouch community
+Made with ❤️ by the Vu Manh Ruy community

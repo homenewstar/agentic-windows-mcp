@@ -6,9 +6,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from windows_mcp.desktop import control, service
-from windows_mcp.desktop.control_context import StepCounter
-from windows_mcp.desktop.control_ledger import InputLedger, InputUnavailable
+from agentic_windows_mcp.desktop import control, service
+from agentic_windows_mcp.desktop.control_context import StepCounter
+from agentic_windows_mcp.desktop.control_ledger import InputLedger, InputUnavailable
 
 
 def ready_controller() -> control.ControlCoordinator:

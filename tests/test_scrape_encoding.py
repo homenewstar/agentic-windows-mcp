@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.desktop.service import Desktop
 
 UTF8_PAGE = (
     '<html><head><meta charset="utf-8" /><title>哈尔滨天气预报</title></head>'
@@ -58,7 +58,7 @@ def _page(payload: bytes, content_type: str) -> Callable[[BaseHTTPRequestHandler
 def _patch_validator(monkeypatch: pytest.MonkeyPatch) -> None:
     """Let the loopback fixtures through the SSRF blocklist, as in test_scrape_ssrf.py."""
     monkeypatch.setattr(
-        "windows_mcp.infrastructure.security.validate_url",
+        "agentic_windows_mcp.infrastructure.security.validate_url",
         lambda url, *, allow_private=False: None,
     )
 

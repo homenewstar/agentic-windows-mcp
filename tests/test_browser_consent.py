@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from windows_mcp.browser import consent
+from agentic_windows_mcp.browser import consent
 
 
 def test_title_markers_en_and_vi():

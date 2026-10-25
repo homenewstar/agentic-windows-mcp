@@ -12,9 +12,9 @@ from types import SimpleNamespace
 import pytest
 from fastmcp import Client, FastMCP
 
-from windows_mcp.desktop.control import ControlBlocked, ControlCoordinator, current_token
-from windows_mcp.desktop.control_ledger import InputLedger
-from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+from agentic_windows_mcp.desktop.control import ControlBlocked, ControlCoordinator, current_token
+from agentic_windows_mcp.desktop.control_ledger import InputLedger
+from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
 
 
 def _legacy_notification_client(transport, **kwargs):
@@ -259,7 +259,7 @@ async def test_notifier_sends_takeover_and_recovery_and_prunes_failed_session():
     good, bad = FakeSession(), FakeSession(fail=True)
     loop = asyncio.get_running_loop()
     now = time.monotonic()
-    from windows_mcp.tools.control_notifications import _Session
+    from agentic_windows_mcp.tools.control_notifications import _Session
 
     notifier._sessions[id(good)] = _Session(good, loop, now)
     notifier._sessions[id(bad)] = _Session(bad, loop, now)
@@ -286,7 +286,7 @@ async def test_notifier_orders_cross_thread_events_by_generation():
     notifier = ControlNotifier(controller)
     notifier.start()
     session = FakeSession()
-    from windows_mcp.tools.control_notifications import _Session
+    from agentic_windows_mcp.tools.control_notifications import _Session
 
     notifier._sessions[id(session)] = _Session(
         session, asyncio.get_running_loop(), time.monotonic()
@@ -319,7 +319,7 @@ async def test_notifier_close_cancels_and_awaits_blocked_send():
             delivered.append(kwargs)
 
     session = BlockingSession()
-    from windows_mcp.tools.control_notifications import _Session
+    from agentic_windows_mcp.tools.control_notifications import _Session
 
     notifier._sessions[id(session)] = _Session(
         session, asyncio.get_running_loop(), time.monotonic()
@@ -354,13 +354,13 @@ async def test_stateless_mode_registers_no_push_session():
 
 @pytest.mark.asyncio
 async def test_expired_sessions_receive_no_push_and_status_filter_is_reserved():
-    from windows_mcp.__main__ import _apply_tool_filter
+    from agentic_windows_mcp.__main__ import _apply_tool_filter
 
     controller = FakeController()
     notifier = ControlNotifier(controller, ttl=60)
     notifier.start()
     stale = FakeSession()
-    from windows_mcp.tools.control_notifications import _Session
+    from agentic_windows_mcp.tools.control_notifications import _Session
 
     notifier._sessions[id(stale)] = _Session(
         stale, asyncio.get_running_loop(), time.monotonic() - 61
@@ -392,11 +392,11 @@ async def test_expired_sessions_receive_no_push_and_status_filter_is_reserved():
 
 @pytest.mark.asyncio
 async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
-    from windows_mcp import __main__ as wm
-    from windows_mcp.desktop import control as control_module, control_overlay
-    from windows_mcp.desktop import service as desktop_service
-    from windows_mcp.watchdog import service as watchdog_service
-    from windows_mcp import tools as tool_registry
+    from agentic_windows_mcp import __main__ as wm
+    from agentic_windows_mcp.desktop import control as control_module, control_overlay
+    from agentic_windows_mcp.desktop import service as desktop_service
+    from agentic_windows_mcp.watchdog import service as watchdog_service
+    from agentic_windows_mcp import tools as tool_registry
 
     class Controller(FakeController):
         _thread = None

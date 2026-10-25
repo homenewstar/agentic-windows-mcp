@@ -9,8 +9,8 @@ cover that: `Control.GetChildren` falls back to `FindAll`, and
 
 import pytest
 
-from windows_mcp.desktop.service import Desktop
-from windows_mcp.uia.controls import Control, _ViewWalkerState
+from agentic_windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.uia.controls import Control, _ViewWalkerState
 
 
 @pytest.fixture(autouse=True)

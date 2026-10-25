@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from windows_mcp.infrastructure import uia_thread_id, with_analytics
+from agentic_windows_mcp.infrastructure import uia_thread_id, with_analytics
 
 
 class TestThreadDispatch:
@@ -140,7 +140,7 @@ class TestEventLoopResponsiveness:
 
 class TestRequestContext:
     async def test_request_token_and_steps_cross_worker_without_leaking(self):
-        from windows_mcp.desktop.control_context import current_token, current_steps, StepCounter
+        from agentic_windows_mcp.desktop.control_context import current_token, current_steps, StepCounter
 
         @with_analytics(None, "context", run_sync_in_thread=False)
         def operation():
@@ -166,7 +166,7 @@ class TestRequestContext:
                 current_token.reset(token_marker)
 
         assert await asyncio.gather(request(11), request(22)) == [11, 22]
-        from windows_mcp.infrastructure.thread_affinity import run_uia_affine
+        from agentic_windows_mcp.infrastructure.thread_affinity import run_uia_affine
 
         assert await run_uia_affine(lambda: (current_token.get(), current_steps.get())) == (
             None,
@@ -174,8 +174,8 @@ class TestRequestContext:
         )
 
     async def test_exception_does_not_leave_worker_context(self):
-        from windows_mcp.desktop.control_context import current_token
-        from windows_mcp.infrastructure.thread_affinity import run_uia_affine
+        from agentic_windows_mcp.desktop.control_context import current_token
+        from agentic_windows_mcp.infrastructure.thread_affinity import run_uia_affine
 
         def failing():
             assert current_token.get() == 33
@@ -192,9 +192,9 @@ class TestRequestContext:
         assert await run_uia_affine(current_token.get) is None
 
     async def test_unguarded_call_remains_usable(self):
-        from windows_mcp.desktop.control import ControlCoordinator
-        from windows_mcp.desktop.control_context import current_token
-        from windows_mcp.infrastructure.thread_affinity import run_uia_affine
+        from agentic_windows_mcp.desktop.control import ControlCoordinator
+        from agentic_windows_mcp.desktop.control_context import current_token
+        from agentic_windows_mcp.infrastructure.thread_affinity import run_uia_affine
 
         owner = ControlCoordinator()
 
@@ -208,8 +208,8 @@ class TestRequestContext:
     async def test_mcp_takeover_stops_next_affine_step_and_preserves_count(self):
         """Real MCP gate and UIA worker; only the input effects are simulated."""
         from fastmcp import Client, FastMCP
-        from windows_mcp.desktop.control import ControlBlocked, ControlCoordinator
-        from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+        from agentic_windows_mcp.desktop.control import ControlBlocked, ControlCoordinator
+        from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
 
         owner = ControlCoordinator()
         owner._state = "ready"

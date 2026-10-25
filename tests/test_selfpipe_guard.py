@@ -21,8 +21,8 @@ from asyncio.selector_events import BaseSelectorEventLoop
 import pytest
 from click.testing import CliRunner
 
-import windows_mcp.__main__ as cli
-from windows_mcp.infrastructure.eventloop import (
+import agentic_windows_mcp.__main__ as cli
+from agentic_windows_mcp.infrastructure.eventloop import (
     SELFPIPE_REBUILD_WARN_AT,
     install_selfpipe_guard,
 )
@@ -153,7 +153,7 @@ class TestRepeatedFailures:
     def test_persistent_failure_is_reported(self, loop, caplog):
         loop._selfpipe_rebuilds = SELFPIPE_REBUILD_WARN_AT - 1
 
-        with caplog.at_level(logging.WARNING, logger="windows_mcp.infrastructure.eventloop"):
+        with caplog.at_level(logging.WARNING, logger="agentic_windows_mcp.infrastructure.eventloop"):
             cpu_share_while_idle(loop, seconds=0.2, kill=close_peer)
 
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]

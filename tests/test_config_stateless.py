@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from windows_mcp.infrastructure.config import (
+from agentic_windows_mcp.infrastructure.config import (
     ServerConfig,
     WindowsMCPConfig,
     load_config,
@@ -91,7 +91,7 @@ def test_load_stateless_http_default_when_absent(tmp_path: Path):
 def test_run_server_passes_stateless_http_kwarg(monkeypatch):
     """When _run_server is called for streamable-http it must forward
     stateless_http through to FastMCP's mcp.run()."""
-    from windows_mcp import __main__ as wm
+    from agentic_windows_mcp import __main__ as wm
 
     captured: dict = {}
 
@@ -113,7 +113,7 @@ def test_run_server_passes_stateless_http_kwarg(monkeypatch):
 
 
 def test_run_server_stateless_default_false(monkeypatch):
-    from windows_mcp import __main__ as wm
+    from agentic_windows_mcp import __main__ as wm
 
     captured: dict = {}
 

@@ -2,8 +2,8 @@
 
 import pytest
 
-from windows_mcp.uia import core
-from windows_mcp.uia.enums import KeyboardEventFlag, Keys
+from agentic_windows_mcp.uia import core
+from agentic_windows_mcp.uia.enums import KeyboardEventFlag, Keys
 
 
 @pytest.fixture

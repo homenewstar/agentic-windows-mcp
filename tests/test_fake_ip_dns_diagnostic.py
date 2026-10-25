@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from windows_mcp.infrastructure import validate_url
+from agentic_windows_mcp.infrastructure import validate_url
 
 
 def _addrinfo(ip: str, family: int, port: int = 443) -> list[tuple]:

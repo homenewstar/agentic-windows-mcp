@@ -3,8 +3,8 @@
 import pytest
 from click.testing import CliRunner
 
-from windows_mcp import __main__ as cli
-from windows_mcp.infrastructure.config import ControlConfig
+from agentic_windows_mcp import __main__ as cli
+from agentic_windows_mcp.infrastructure.config import ControlConfig
 
 
 @pytest.fixture
@@ -23,9 +23,9 @@ def invoke(monkeypatch, tmp_path):
             cli.main,
             ["serve", "--config", str(path), *args],
             env={
-                "WINDOWS_MCP_CONTROL": None,
-                "WINDOWS_MCP_CONTROL_POLICY": None,
-                "WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": None,
+                "AGENTIC_WINDOWS_MCP_CONTROL": None,
+                "AGENTIC_WINDOWS_MCP_CONTROL_POLICY": None,
+                "AGENTIC_WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": None,
                 **(env or {}),
             },
         )
@@ -39,14 +39,14 @@ def invoke(monkeypatch, tmp_path):
     "args,env,enabled,timeout",
     [
         ([], {}, False, 4.5),
-        ([], {"WINDOWS_MCP_CONTROL": "true", "WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": "2"}, True, 2),
+        ([], {"AGENTIC_WINDOWS_MCP_CONTROL": "true", "AGENTIC_WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": "2"}, True, 2),
         (
             ["--control", "--control-idle-timeout", "1.5"],
-            {"WINDOWS_MCP_CONTROL": "false", "WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": "2"},
+            {"AGENTIC_WINDOWS_MCP_CONTROL": "false", "AGENTIC_WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": "2"},
             True,
             1.5,
         ),
-        (["--no-control"], {"WINDOWS_MCP_CONTROL": "true"}, False, 4.5),
+        (["--no-control"], {"AGENTIC_WINDOWS_MCP_CONTROL": "true"}, False, 4.5),
     ],
 )
 def test_startup_precedence(invoke, args, env, enabled, timeout):
@@ -61,14 +61,14 @@ def test_startup_precedence(invoke, args, env, enabled, timeout):
 def test_invalid_timeout_never_starts_server(invoke, value, source):
     result, captured = invoke(
         ["--control-idle-timeout", value] if source == "cli" else [],
-        {"WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": value} if source == "env" else {},
+        {"AGENTIC_WINDOWS_MCP_CONTROL_IDLE_TIMEOUT": value} if source == "env" else {},
     )
     assert result.exit_code != 0
     assert not captured
 
 
 def test_invalid_enabled_environment_never_starts_server(invoke):
-    result, captured = invoke(env={"WINDOWS_MCP_CONTROL": "perhaps"})
+    result, captured = invoke(env={"AGENTIC_WINDOWS_MCP_CONTROL": "perhaps"})
     assert result.exit_code != 0
     assert not captured
 
@@ -85,8 +85,8 @@ def test_help_explains_restart_and_defaults():
     "args,env,expected",
     [
         ([], {}, "balanced"),
-        ([], {"WINDOWS_MCP_CONTROL_POLICY": "relaxed"}, "relaxed"),
-        (["--control-policy", "strict"], {"WINDOWS_MCP_CONTROL_POLICY": "balanced"}, "strict"),
+        ([], {"AGENTIC_WINDOWS_MCP_CONTROL_POLICY": "relaxed"}, "relaxed"),
+        (["--control-policy", "strict"], {"AGENTIC_WINDOWS_MCP_CONTROL_POLICY": "balanced"}, "strict"),
     ],
 )
 def test_policy_startup_precedence(invoke, args, env, expected):
@@ -99,7 +99,7 @@ def test_policy_startup_precedence(invoke, args, env, expected):
 def test_invalid_policy_never_starts(invoke, source):
     result, captured = invoke(
         ["--control-policy", "unknown"] if source == "cli" else [],
-        {"WINDOWS_MCP_CONTROL_POLICY": "unknown"} if source == "env" else {},
+        {"AGENTIC_WINDOWS_MCP_CONTROL_POLICY": "unknown"} if source == "env" else {},
     )
     assert result.exit_code != 0
     assert not captured

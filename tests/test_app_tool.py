@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from windows_mcp.tools import app
+from agentic_windows_mcp.tools import app
 
 
 class FakeMCP:

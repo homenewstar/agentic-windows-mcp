@@ -14,8 +14,8 @@ import sys
 
 import pytest
 
-from windows_mcp.powershell import service
-from windows_mcp.powershell.service import PowerShellExecutor
+from agentic_windows_mcp.powershell import service
+from agentic_windows_mcp.powershell.service import PowerShellExecutor
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows PATH resolution")
 

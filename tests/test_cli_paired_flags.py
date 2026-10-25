@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 from click.testing import CliRunner
 
-import windows_mcp.__main__ as cli
-from windows_mcp.__main__ import main
+import agentic_windows_mcp.__main__ as cli
+from agentic_windows_mcp.__main__ import main
 
 
 def _prepare_serve(monkeypatch):

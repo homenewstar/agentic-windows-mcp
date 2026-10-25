@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from windows_mcp.desktop import control, control_win32
-from windows_mcp.desktop.control_ledger import InputUnavailable
+from agentic_windows_mcp.desktop import control, control_win32
+from agentic_windows_mcp.desktop.control_ledger import InputUnavailable
 
 
 def _fake_user32(handles, events, on_idle=None):

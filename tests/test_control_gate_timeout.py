@@ -5,7 +5,7 @@ blocked by a native dialog, a subprocess whose output pipe is held open by
 a long-lived child) held the gate lock forever; every later gated call
 queued behind it and only ControlStatus (which bypasses the gate) answered,
 until the server was restarted. The gate now enforces a per-call deadline
-(WINDOWS_MCP_TOOL_TIMEOUT_SECONDS): the await is cancelled, the lease and
+(AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS): the await is cancelled, the lease and
 lock are released, and later calls proceed.
 """
 
@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import pytest
 from fastmcp.exceptions import ToolError
 
-from windows_mcp.tools.control_notifications import ControlToolGate
+from agentic_windows_mcp.tools.control_notifications import ControlToolGate
 
 
 class _FakeController:
@@ -62,7 +62,7 @@ async def _hang(context):
 
 
 def test_hung_call_times_out_and_releases_gate(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "0.3")
+    monkeypatch.setenv("AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "0.3")
     controller = _FakeController()
     gate = ControlToolGate(controller, _FakeNotifier())
 
@@ -84,7 +84,7 @@ def test_hung_call_times_out_and_releases_gate(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_fast_call_unaffected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "5")
+    monkeypatch.setenv("AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "5")
     controller = _FakeController()
     gate = ControlToolGate(controller, _FakeNotifier())
     assert asyncio.run(gate.on_call_tool(_context(), _fast)) == "ok"
@@ -92,7 +92,7 @@ def test_fast_call_unaffected(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_deadline_disabled_with_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "0")
     controller = _FakeController()
     gate = ControlToolGate(controller, _FakeNotifier())
 
@@ -104,13 +104,13 @@ def test_deadline_disabled_with_zero(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_timeout_env_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
-    from windows_mcp.tools.control_notifications import tool_timeout_seconds
+    from agentic_windows_mcp.tools.control_notifications import tool_timeout_seconds
 
-    monkeypatch.delenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", raising=False)
     assert tool_timeout_seconds() == 180.0
-    monkeypatch.setenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "garbage")
+    monkeypatch.setenv("AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "garbage")
     assert tool_timeout_seconds() == 180.0
-    monkeypatch.setenv("WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "12.5")
+    monkeypatch.setenv("AGENTIC_WINDOWS_MCP_TOOL_TIMEOUT_SECONDS", "12.5")
     assert tool_timeout_seconds() == 12.5
 
 

@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from windows_mcp.tools.filesystem import register as register_filesystem
-from windows_mcp.tools.multi import register as register_multi
+from agentic_windows_mcp.tools.filesystem import register as register_filesystem
+from agentic_windows_mcp.tools.multi import register as register_multi
 
 
 class FakeMCP:

@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
-  "name": "io.github.CursorTouch/Windows-MCP",
-  "description": "An MCP Server for computer-use in Windows OS",
+  "name": "io.github.homenewstar/agentic-windows-mcp",
+  "description": "Agentic Windows MCP - an MCP server for full computer control and automation in Windows OS",
   "status": "active",
   "repository": {
-    "url": "https://github.com/CursorTouch/Windows-MCP",
+    "url": "https://github.com/homenewstar/agentic-windows-mcp",
     "source": "github"
   },
   "version": "1.0.1",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "windows-mcp",
+      "identifier": "agentic-windows-mcp",
       "version": "0.8.8",
       "runtimeHint": "uvx",
       "transport": {

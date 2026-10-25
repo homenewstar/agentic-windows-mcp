@@ -3,28 +3,28 @@ import subprocess
 import pytest
 from click.testing import CliRunner
 
-from windows_mcp import __main__ as wm
+from agentic_windows_mcp import __main__ as wm
 
 
 @pytest.mark.parametrize(
     ("args", "suggestion"),
     [
-        (["--transport", "sse"], "windows-mcp serve --transport sse"),
-        (["--debug"], "windows-mcp serve --debug"),
-        (["--port", "8000"], "windows-mcp serve --port 8000"),
-        (["--no-control"], "windows-mcp serve --no-control"),
-        (["--control"], "windows-mcp serve --control"),
-        (["--control-policy", "strict"], "windows-mcp serve --control-policy strict"),
-        (["--control-idle-timeout", "3"], "windows-mcp serve --control-idle-timeout 3"),
+        (["--transport", "sse"], "agentic-windows-mcp serve --transport sse"),
+        (["--debug"], "agentic-windows-mcp serve --debug"),
+        (["--port", "8000"], "agentic-windows-mcp serve --port 8000"),
+        (["--no-control"], "agentic-windows-mcp serve --no-control"),
+        (["--control"], "agentic-windows-mcp serve --control"),
+        (["--control-policy", "strict"], "agentic-windows-mcp serve --control-policy strict"),
+        (["--control-idle-timeout", "3"], "agentic-windows-mcp serve --control-idle-timeout 3"),
     ],
 )
 def test_legacy_serve_flags_at_group_level_get_migration_hint(args, suggestion):
     result = CliRunner().invoke(wm.main, args)
 
     assert result.exit_code == 2
-    assert "`windows-mcp` is now a command group" in result.output
+    assert "`agentic-windows-mcp` is now a command group" in result.output
     assert suggestion in result.output
-    assert "windows-mcp serve --help" in result.output
+    assert "agentic-windows-mcp serve --help" in result.output
 
 
 def test_serve_options_still_work_on_serve_subcommand_help():
@@ -41,7 +41,7 @@ def test_install_options_are_not_blocked_by_legacy_filter(monkeypatch, tmp_path)
 
     monkeypatch.setattr(wm, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wm, "_START_SCRIPT_PATH", tmp_path / "start-server.cmd")
-    monkeypatch.setattr(wm, "_resolve_program", lambda: ["windows-mcp"])
+    monkeypatch.setattr(wm, "_resolve_program", lambda: ["agentic-windows-mcp"])
     monkeypatch.setattr(wm, "_schtasks", fake_schtasks)
     # Installation also uses PowerShell; never register a real task in this test.
     monkeypatch.setattr(
@@ -54,7 +54,7 @@ def test_install_options_are_not_blocked_by_legacy_filter(monkeypatch, tmp_path)
 
     assert result.exit_code == 0, result.output
     assert "Scheduled task installed" in result.output
-    assert "windows-mcp serve --transport sse" in (tmp_path / "start-server.cmd").read_text(
+    assert "agentic-windows-mcp serve --transport sse" in (tmp_path / "start-server.cmd").read_text(
         encoding="utf-8"
     )
 

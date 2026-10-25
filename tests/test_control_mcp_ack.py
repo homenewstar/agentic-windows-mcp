@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from windows_mcp.desktop.control import ControlBlocked
-from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
+from agentic_windows_mcp.desktop.control import ControlBlocked
+from agentic_windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
 
 
 class FakeController:

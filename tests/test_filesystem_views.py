@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from windows_mcp.filesystem.views import File, Directory, format_size, MAX_READ_SIZE, MAX_RESULTS
+from agentic_windows_mcp.filesystem.views import File, Directory, format_size, MAX_READ_SIZE, MAX_RESULTS
 
 
 class TestFormatSize:

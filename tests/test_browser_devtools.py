@@ -1,6 +1,6 @@
 import asyncio
 import urllib.parse
-from windows_mcp.browser.devtools_manager import BrowserDevToolsManager
+from agentic_windows_mcp.browser.devtools_manager import BrowserDevToolsManager
 
 TEST_HTML = """<!DOCTYPE html>
 <html>

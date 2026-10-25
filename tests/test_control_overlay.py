@@ -8,8 +8,8 @@ from unittest.mock import Mock
 from PIL import Image
 import pytest
 
-from windows_mcp.desktop import control, control_overlay, flash_overlay
-from windows_mcp.desktop.service import Desktop
+from agentic_windows_mcp.desktop import control, control_overlay, flash_overlay
+from agentic_windows_mcp.desktop.service import Desktop
 
 
 @pytest.fixture(autouse=True)
@@ -316,7 +316,7 @@ def test_screenshot_capture_runs_only_while_indicator_hidden(monkeypatch, backen
         flash_overlay, "show_capture_flash", lambda rect: events.append("show flash")
     )
     monkeypatch.setattr(
-        "windows_mcp.desktop.service.screenshot_capture.capture",
+        "agentic_windows_mcp.desktop.service.screenshot_capture.capture",
         lambda rect: (events.append("capture") or Image.new("RGB", (2, 2)), backend),
     )
     desktop = Desktop.__new__(Desktop)
@@ -344,7 +344,7 @@ def test_screenshot_error_restores_indicator_without_flash(monkeypatch):
         events.append("capture")
         raise OSError("capture failed")
 
-    monkeypatch.setattr("windows_mcp.desktop.service.screenshot_capture.capture", failing_capture)
+    monkeypatch.setattr("agentic_windows_mcp.desktop.service.screenshot_capture.capture", failing_capture)
     with pytest.raises(OSError, match="capture failed"):
         Desktop.__new__(Desktop).get_screenshot()
     assert events == ["hide", "capture", "restore"]
@@ -360,7 +360,7 @@ def test_stalled_capture_releases_physical_input_and_keeps_status_available(monk
     )
     token = owner.begin_call("Screenshot")
     started, release = threading.Event(), threading.Event()
-    monkeypatch.setattr("windows_mcp.desktop.service.get_controller", lambda: owner)
+    monkeypatch.setattr("agentic_windows_mcp.desktop.service.get_controller", lambda: owner)
     monkeypatch.setattr(flash_overlay, "cancel_active_flash", lambda: True)
     monkeypatch.setattr(flash_overlay, "show_capture_flash", lambda rect: None)
 
@@ -375,7 +375,7 @@ def test_stalled_capture_releases_physical_input_and_keeps_status_available(monk
         return Image.new("RGB", (2, 2)), "test"
 
     monkeypatch.setattr(control_overlay, "suspend_for_capture", hidden)
-    monkeypatch.setattr("windows_mcp.desktop.service.screenshot_capture.capture", capture)
+    monkeypatch.setattr("agentic_windows_mcp.desktop.service.screenshot_capture.capture", capture)
     result = []
     worker = threading.Thread(
         target=lambda: result.append(Desktop.__new__(Desktop).get_screenshot())
@@ -410,7 +410,7 @@ def test_unclosed_flash_prevents_new_capture(monkeypatch):
     monkeypatch.setattr(control_overlay, "suspend_for_capture", suspended)
     monkeypatch.setattr(flash_overlay, "cancel_active_flash", lambda: False)
     monkeypatch.setattr(
-        "windows_mcp.desktop.service.screenshot_capture.capture",
+        "agentic_windows_mcp.desktop.service.screenshot_capture.capture",
         lambda rect: events.append("capture"),
     )
     with pytest.raises(RuntimeError, match="did not close"):

@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 import urllib.parse
 from agentic_windows_mcp.browser.devtools_manager import BrowserDevToolsManager
 
@@ -46,7 +47,29 @@ TEST_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
+def _browser_test_available() -> bool:
+    """The lifecycle test needs a real browser: either the user's Chrome
+    with remote debugging on 127.0.0.1:9222 or a Playwright Chromium build
+    installed on this machine. Neither exists on a bare CI runner."""
+    import glob as _glob
+    import os as _os
+    import socket as _socket
+
+    try:
+        with _socket.create_connection(("127.0.0.1", 9222), timeout=0.5):
+            return True
+    except OSError:
+        pass
+    roots = [_os.environ.get("LOCALAPPDATA", ""), _os.path.expanduser("~/.cache")]
+    return any(
+        root and _glob.glob(_os.path.join(root, "ms-playwright", "chromium*"))
+        for root in roots
+    )
+
+
 async def test_devtools_lifecycle_and_extraction():
+    if not _browser_test_available():
+        pytest.skip("No debug browser on :9222 and no Playwright Chromium installed")
     manager = BrowserDevToolsManager.get_instance()
     
     # 1. Connect or launch standalone headless browser

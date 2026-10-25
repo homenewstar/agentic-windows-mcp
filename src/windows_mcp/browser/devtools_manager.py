@@ -8,6 +8,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+import json as _json
 from bs4 import BeautifulSoup
 from playwright.async_api import (
     Browser,
@@ -193,6 +194,13 @@ class CdpNetworkTracker:
         for request_id in reversed(self.order):
             entry = self.requests[request_id]
             if entry.get("url") and lowered in entry["url"].lower():
+                return entry
+        return None
+
+    def find_by_exact_url(self, url: str) -> Optional[Dict[str, Any]]:
+        for request_id in reversed(self.order):
+            entry = self.requests[request_id]
+            if entry.get("url") == url:
                 return entry
         return None
 
@@ -1213,9 +1221,14 @@ class BrowserDevToolsManager:
             session, tracker = None, None
         cdp_entry = None
         if tracker is not None:
-            cdp_entry = tracker.find_by_id(request_id_or_url) or tracker.find_by_url(
-                request_id_or_url
-            )
+            cdp_entry = tracker.find_by_id(request_id_or_url)
+            # Prefer an exact URL match: a bare origin needle is a prefix of
+            # every subresource URL on that origin, so plain substring search
+            # would return the latest script instead of the document.
+            if cdp_entry is None and base and base.get("url"):
+                cdp_entry = tracker.find_by_exact_url(base["url"])
+            if cdp_entry is None:
+                cdp_entry = tracker.find_by_url(request_id_or_url)
             if cdp_entry is None and base and base.get("url"):
                 cdp_entry = tracker.find_by_url(base["url"])
         if base is None and cdp_entry is None:
@@ -1431,12 +1444,22 @@ class BrowserDevToolsManager:
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         session, _tracker = await self._get_cdp(page)
-        document = await session.send("DOM.getDocument", {"depth": 1})
-        root_id = document.get("root", {}).get("nodeId", 0)
-        found = await session.send(
-            "DOM.querySelector", {"nodeId": root_id, "selector": selector}
+        # Resolve the element through Runtime + DOM.requestNode: querying
+        # from a shallow DOM.getDocument snapshot misses nodes the DOM
+        # agent has not been told about yet.
+        evaluated = await session.send(
+            "Runtime.evaluate",
+            {
+                "expression": f"document.querySelector({_json.dumps(selector)})",
+                "returnByValue": False,
+            },
         )
-        node_id = found.get("nodeId", 0)
+        remote = evaluated.get("result", {})
+        object_id = remote.get("objectId")
+        if not object_id or remote.get("subtype") == "null":
+            raise ValueError(f"Element not found for selector: {selector}")
+        node = await session.send("DOM.requestNode", {"objectId": object_id})
+        node_id = node.get("nodeId", 0)
         if not node_id:
             raise ValueError(f"Element not found for selector: {selector}")
         matched = await session.send(

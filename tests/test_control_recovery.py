@@ -253,9 +253,12 @@ def test_missed_alt_tab_release_after_ai_lease_recovers(case):
     clock[0] += 20
     owner._handle(("tick",))
     assert owner.status()["state"] == "ready"
-    with pytest.raises(control.ControlBlocked, match="PHYSICAL_INPUT_HELD"):
-        owner.begin_call("BlockedProbe")
-    # A real held key must keep blocking even in ready; no timeout clears it.
+    # Agent-priority: held keys no longer veto a new call (no
+    # PHYSICAL_INPUT_HELD); the lease opens and closes normally.
+    owner.end_call(owner.begin_call("UnblockedProbe"))
+    # A real held key is still tracked; no timeout clears a genuine hold.
+    clock[0] += 20  # Expire the probe lease so recovery sampling resumes.
+    owner._handle(("tick",))
     samples(case, lambda vk: 0x8000, 10)
     assert owner._pressed == {0xA4, 0x09}
     samples(case, lambda vk: 0, 4)
@@ -265,12 +268,12 @@ def test_missed_alt_tab_release_after_ai_lease_recovers(case):
     owner.end_call(owner.begin_call("RecoveredProbe"))
 
 
-def test_missed_mouse_release_after_confirmed_takeover_recovers(case):
+def test_missed_mouse_release_after_chord_takeover_recovers(case):
     owner, _, clock = case
     owner._pressed.clear()
     owner._state = "ready"
     token = owner.begin_call("FirstProbe")
-    owner._handle(("raw", 1, 500, 0))
+    owner._handle(("hotkey",))  # The chord is the only confirmed takeover.
     assert owner._state == "user"
     owner._mouse_down.add(1)  # A physical mouse down whose up never arrives.
     owner._last_physical_event = clock[0]

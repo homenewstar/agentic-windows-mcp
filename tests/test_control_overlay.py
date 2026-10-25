@@ -387,13 +387,16 @@ def test_stalled_capture_releases_physical_input_and_keeps_status_available(monk
         assert owner.status()["state"] == "ai"
         with pytest.raises(control.ControlBlocked):
             owner.checkpoint(token)
-        owner._handle(("key",))  # Input delivered during the hidden interval wins.
-        assert owner.status()["state"] == "user"
+        # Input delivered during the hidden interval is bookkeeping only
+        # under agent-priority; it does not take control.
+        owner._handle(("key",))
+        assert owner.status()["state"] == "ai"
     finally:
         release.set()
         worker.join(timeout=2.0)
     assert not worker.is_alive()
-    assert result and not owner._suppress
+    # With no takeover, the restored indicator rearms suppression.
+    assert result and owner._suppress
 
 
 def test_unclosed_flash_prevents_new_capture(monkeypatch):

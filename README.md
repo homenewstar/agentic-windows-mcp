@@ -8,7 +8,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE.md)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
-![Python](https://img.shields.io/badge/Python-3.14%2B-yellow)
+![Python](https://img.shields.io/badge/Python-3.12%2B-yellow)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-purple)
 ![Tools](https://img.shields.io/badge/Tools-40-orange)
 
@@ -91,7 +91,7 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
 
 ## 🚀 Cài đặt (trên máy Windows sẽ bị điều khiển)
 
-**Yêu cầu**: Windows 10/11 · Python 3.14+ · [uv](https://docs.astral.sh/uv/) · Git.
+**Yêu cầu**: Windows 10/11 · Python 3.12+ · [uv](https://docs.astral.sh/uv/) · Git.
 
 ```powershell
 git clone https://github.com/homenewstar/agentic-windows-mcp.git

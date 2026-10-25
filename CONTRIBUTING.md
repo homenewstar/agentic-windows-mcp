@@ -375,7 +375,7 @@ Contributors are recognized in:
 
 ## License
 
-By contributing to Agentic Agentic Windows MCP, you agree that your contributions will be licensed under the [MIT License](LICENSE.md).
+By contributing to Agentic Agentic Windows MCP, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE.md).
 
 ---
 

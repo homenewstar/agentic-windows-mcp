@@ -2,15 +2,22 @@
 
 ## Overview
 
-Agentic Agentic Windows MCP provides powerful automation capabilities that interact directly with your Windows operating system. This document outlines security considerations, best practices, and our commitment to maintaining a secure project.
+Agentic Windows MCP provides powerful automation capabilities that interact directly with your Windows operating system. This document outlines security considerations, best practices, and our commitment to maintaining a secure project.
+
+## Supported Versions
+
+| Version | Supported |
+|---|---|
+| 0.8.x (latest) | ✅ Security fixes |
+| < 0.8.8 | ❌ No longer supported — please upgrade |
 
 ## ⚠️ CRITICAL WARNING
 
-**READ THIS BEFORE DEPLOYING WINDOWS-MCP**
+**READ THIS BEFORE DEPLOYING AGENTIC WINDOWS MCP**
 
 ### Direct Operating System Interaction
 
-Agentic Agentic Windows MCP is **NOT** a sandboxed or isolated tool. It interacts **directly with your actual Windows operating system** on behalf of the connected LLM agent. This means:
+Agentic Windows MCP is **NOT** a sandboxed or isolated tool. It interacts **directly with your actual Windows operating system** on behalf of the connected LLM agent. This means:
 
 - **Real System Actions**: Every tool call executes real actions on your physical or virtual Windows machine
 - **No Safety Net**: There is no intermediate layer, simulation, or preview mode
@@ -18,7 +25,7 @@ Agentic Agentic Windows MCP is **NOT** a sandboxed or isolated tool. It interact
 
 ### Irreversible and Destructive Changes
 
-Many operations performed by Agentic Agentic Windows MCP **CANNOT BE UNDONE**:
+Many operations performed by Agentic Windows MCP **CANNOT BE UNDONE**:
 
 - **File Deletions**: Files deleted through PowerShell or UI interactions may be permanently lost
 - **Data Overwrites**: Text typed with `clear=True` replaces existing content without recovery options
@@ -28,7 +35,7 @@ Many operations performed by Agentic Agentic Windows MCP **CANNOT BE UNDONE**:
 
 ### Where NOT to Deploy
 
-**DO NOT** deploy Agentic Agentic Windows MCP on systems where you cannot tolerate the risk of:
+**DO NOT** deploy Agentic Windows MCP on systems where you cannot tolerate the risk of:
 
 - ❌ Accidental data loss or corruption
 - ❌ Unintended system configuration changes
@@ -47,7 +54,7 @@ Many operations performed by Agentic Agentic Windows MCP **CANNOT BE UNDONE**:
 
 ### Recommended Safe Deployment
 
-For safer experimentation and usage, **strongly consider** deploying Agentic Agentic Windows MCP in:
+For safer experimentation and usage, **strongly consider** deploying Agentic Windows MCP in:
 
 ✅ **Virtual Machines (VMs)**
 - Use VMware, VirtualBox, Hyper-V, or similar virtualization platforms
@@ -68,7 +75,7 @@ For safer experimentation and usage, **strongly consider** deploying Agentic Age
 
 ### Impact Limitation Strategies
 
-If you must use Agentic Agentic Windows MCP on a regular system:
+If you must use Agentic Windows MCP on a regular system:
 
 1. **Create a Dedicated User Account**: Run the MCP server under a restricted user account with minimal permissions
 2. **Regular Backups**: Maintain frequent, verified backups of all important data
@@ -81,7 +88,7 @@ If you must use Agentic Agentic Windows MCP on a regular system:
 
 ### System Access Level
 
-Agentic Agentic Windows MCP operates with the same permissions as the user running it. This means:
+Agentic Windows MCP operates with the same permissions as the user running it. This means:
 
 - **Full System Access**: The MCP server can perform any action that the current user can perform
 - **No Sandboxing**: Tools execute directly on your Windows system without isolation
@@ -128,12 +135,12 @@ These tools only read information without making changes:
 ### 1. **Run with Least Privilege**
 
 - Use a standard user account, not an administrator account, when possible
-- Avoid running Agentic Agentic Windows MCP with elevated privileges unless absolutely necessary
+- Avoid running Agentic Windows MCP with elevated privileges unless absolutely necessary
 - Consider creating a dedicated user account for automation tasks
 
 ### 2. **Trusted LLM Clients Only**
 
-- Only connect Agentic Agentic Windows MCP to trusted MCP clients
+- Only connect Agentic Windows MCP to trusted MCP clients
 - Be cautious when using with third-party or experimental LLM applications
 - Review the client application's security practices before integration
 
@@ -157,7 +164,7 @@ These tools only read information without making changes:
 
 - Be aware that **Snapshot** captures screenshots that may contain sensitive information
 - **Scrape** may fetch content from untrusted websites
-- Avoid using Agentic Agentic Windows MCP in environments with highly sensitive data
+- Avoid using Agentic Windows MCP in environments with highly sensitive data
 - Consider disabling screenshot functionality (`use_vision=False`) when handling confidential information
 
 ### 6. **Code Review**
@@ -206,8 +213,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 Instead, please report security issues via:
 
-1. **Email**: Send details to the project maintainers at [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new)
-2. **GitHub Security Advisories**: Use the [GitHub Security Advisory](https://github.com/homenewstar/agentic-agentic-windows-mcp/security/advisories) feature (preferred)
+1. **GitHub Security Advisories** (preferred): Report privately via [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new)
 
 ### What to Include
 
@@ -232,7 +238,6 @@ We will acknowledge your contribution in the security advisory and release notes
 ### Staying Informed
 
 - Watch this repository for security announcements
-- Follow [@Vu Manh Ruy](https://x.com/Vu Manh Ruy) on X for updates
 - Join our [Discord Community](https://discord.com/invite/Aue9Yj2VzS) for discussions
 
 ### Update Policy
@@ -243,7 +248,7 @@ We will acknowledge your contribution in the security advisory and release notes
 
 ## Dependency Security
 
-Agentic Agentic Windows MCP relies on several third-party libraries. We:
+Agentic Windows MCP relies on several third-party libraries. We:
 
 - Regularly update dependencies to patch known vulnerabilities
 - Monitor security advisories for our dependencies
@@ -260,7 +265,7 @@ Agentic Agentic Windows MCP relies on several third-party libraries. We:
 
 ### Logging
 
-Agentic Agentic Windows MCP does not implement comprehensive audit logging by default. For compliance-sensitive environments, consider:
+Agentic Windows MCP does not implement comprehensive audit logging by default. For compliance-sensitive environments, consider:
 
 - Implementing custom logging middleware
 - Using Windows Event Logging for system-level auditing
@@ -268,22 +273,20 @@ Agentic Agentic Windows MCP does not implement comprehensive audit logging by de
 
 ### Telemetry and Data Privacy
 
-- Agentic Agentic Windows MCP collects anonymous usage data to help improve the MCP server.
-- **We collect:**
+- **No telemetry by default.** This project ships with **no built-in analytics key**: usage analytics is initialized *only* if the operator explicitly opts in by setting the `POSTHOG_API_KEY` environment variable (optionally with `POSTHOG_HOST`). Setting `ANONYMIZED_TELEMETRY=false` disables analytics wiring entirely.
+- **If the operator enables analytics, it records only:**
   - Tool execution status (success/failure)
   - Execution duration
   - Tool name
   - Client name and version (e.g., Claude Desktop, etc.)
   - Anonymized session IDs
-- **We DO NOT collect:**
+- **It never collects:**
   - **Tool arguments** (text typed, coordinates, file paths, etc.)
-  - **Tool outputs** (screenshots, commands results, page content, etc.)
-  - **Personal Information**:
-    - **No User Identifiers** beyond a randomly generated UUID stored locally.
-- **Privacy Considerations:**
+  - **Tool outputs** (screenshots, command results, page content, etc.)
+  - **Personal information** beyond a randomly generated UUID stored locally
+- **Privacy considerations:**
   - **Error Messages**: In rare cases, system error messages (which are captured) may include local file paths if they are part of the OS error description.
-  - Telemetry is **enabled by default** to help maintainers understand usage patterns and prioritize features, but can be disabled at any time by setting the `ANONYMIZED_TELEMETRY` environment variable to `false`.
-  - Agentic Agentic Windows MCP processes all commands locally on your machine.
+  - Agentic Windows MCP processes all commands locally on your machine.
   - Screenshots and state captures remain strictly on your local system.
   - Web scraping may expose browsing activity to the target websites.
 
@@ -302,7 +305,7 @@ Refer to `src/agentic_windows_mcp/__main__.py` and `src/agentic_windows_mcp/tool
 
 **USE AT YOUR OWN RISK**
 
-Agentic Agentic Windows MCP is provided "as is" without warranty of any kind. The maintainers are not responsible for:
+Agentic Windows MCP is provided "as is" without warranty of any kind. The maintainers are not responsible for:
 
 - Data loss or system damage caused by tool usage
 - Security breaches resulting from improper configuration
@@ -318,4 +321,4 @@ Users are solely responsible for:
 
 ## License
 
-This security policy is part of the Agentic Agentic Windows MCP project, licensed under the Apache License 2.0. See [LICENSE](LICENSE.md) for details.
+This security policy is part of the Agentic Windows MCP project, licensed under the Apache License 2.0. See [LICENSE](LICENSE.md) for details.

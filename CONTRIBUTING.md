@@ -50,7 +50,7 @@ Before you begin, ensure you have:
 
 1. **Fork the Repository**
    
-   Click the "Fork" button on the [Agentic Agentic Windows MCP repository](https://github.com/homenewstar/agentic-agentic-windows-mcp) to create your own copy.
+   Click the "Fork" button on the [Agentic Agentic Windows MCP repository](https://github.com/homenewstar/agentic-windows-mcp) to create your own copy.
 
 2. **Clone Your Fork**
    
@@ -62,7 +62,7 @@ Before you begin, ensure you have:
 3. **Add Upstream Remote**
    
    ```bash
-   git remote add upstream https://github.com/homenewstar/agentic-agentic-windows-mcp.git
+   git remote add upstream https://github.com/homenewstar/agentic-windows-mcp.git
    ```
 
 4. **Install Dependencies**

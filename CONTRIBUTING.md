@@ -1,6 +1,6 @@
-# Contributing to Agentic Agentic Windows MCP
+# Contributing to Agentic Windows MCP
 
-Thank you for your interest in contributing to Agentic Agentic Windows MCP! We welcome contributions from the community to help make this project better. This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Agentic Windows MCP! We welcome contributions from the community to help make this project better. This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -41,7 +41,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 Before you begin, ensure you have:
 
 - **Windows OS**: Windows 10 or 11
-- **Python 3.14+**: [Download Python](https://www.python.org/downloads/)
+- **Python 3.12+**: [Download Python](https://www.python.org/downloads/)
 - **UV Package Manager**: Install with `pip install uv` or see [UV documentation](https://github.com/astral-sh/uv)
 - **Git**: [Download Git](https://git-scm.com/downloads)
 - **A GitHub account**: [Sign up here](https://github.com/join)
@@ -50,13 +50,13 @@ Before you begin, ensure you have:
 
 1. **Fork the Repository**
    
-   Click the "Fork" button on the [Agentic Agentic Windows MCP repository](https://github.com/homenewstar/agentic-windows-mcp) to create your own copy.
+   Click the "Fork" button on the [Agentic Windows MCP repository](https://github.com/homenewstar/agentic-windows-mcp) to create your own copy.
 
 2. **Clone Your Fork**
    
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Agentic Agentic Windows MCP.git
-   cd Agentic Agentic Windows MCP
+   git clone https://github.com/YOUR_USERNAME/agentic-windows-mcp.git
+   cd agentic-windows-mcp
    ```
 
 3. **Add Upstream Remote**
@@ -255,7 +255,7 @@ def test_click_tool_validates_coordinates():
 
 3. **Create Pull Request**
    
-   - Go to the [Agentic Agentic Windows MCP repository](https://github.com/homenewstar/agentic-agentic-windows-mcp)
+   - Go to the [Agentic Windows MCP repository](https://github.com/homenewstar/agentic-windows-mcp)
    - Click "New Pull Request"
    - Select your fork and branch
    - Fill out the PR template with:
@@ -332,8 +332,7 @@ Include:
 **DO NOT** report security vulnerabilities through public GitHub issues.
 
 Instead, please:
-1. Email the maintainers at [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new)
-2. Or use [GitHub Security Advisories](https://github.com/homenewstar/agentic-agentic-windows-mcp/security/advisories)
+1. Report it privately via [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new)
 
 See our [Security Policy](SECURITY.md) for more details.
 
@@ -341,9 +340,7 @@ See our [Security Policy](SECURITY.md) for more details.
 
 Need help with your contribution?
 
-- **Discord**: Join our [Discord Community](https://discord.com/invite/Aue9Yj2VzS)
-- **Twitter/X**: Follow [@Vu Manh Ruy](https://x.com/Vu Manh Ruy)
-- **GitHub Discussions**: Ask questions in [Discussions](https://github.com/homenewstar/agentic-agentic-windows-mcp/discussions)
+- **GitHub Discussions**: Ask questions in [Discussions](https://github.com/homenewstar/agentic-windows-mcp/discussions)
 - **Issues**: Open an issue for technical questions
 
 ## Types of Contributions
@@ -375,10 +372,10 @@ Contributors are recognized in:
 
 ## License
 
-By contributing to Agentic Agentic Windows MCP, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE.md).
+By contributing to Agentic Windows MCP, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE.md).
 
 ---
 
-Thank you for contributing to Agentic Agentic Windows MCP! Your efforts help make this project better for everyone. 🙏
+Thank you for contributing to Agentic Windows MCP! Your efforts help make this project better for everyone. 🙏
 
 Made with ❤️ by the Vu Manh Ruy community

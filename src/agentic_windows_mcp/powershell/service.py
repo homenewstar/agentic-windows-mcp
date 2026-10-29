@@ -229,6 +229,33 @@ def encode_command(command: str) -> str:
     return base64.b64encode(wrap_command(command).encode("utf-16le")).decode("ascii")
 
 
+def build_invocation(
+        command: str, shell: str | None = None
+) -> tuple[list[str], dict[str, str]]:
+    """Build the ``(argv, env)`` used to launch a PowerShell command.
+
+    Shared by the synchronous executor and the background job runner so both
+    paths resolve the shell, rebuild the environment and wrap the command
+    (UTF-8, no progress records) identically.
+    """
+    encoded = encode_command(command)
+    env = _prepare_env()
+    # NO_COLOR suppresses ANSI escape sequences in pwsh 7.2+ (and many other CLI tools).
+    # PS5.1 has no ANSI output, so this is harmlessly ignored there.
+    # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_ansi_terminals#disabling-ansi-output
+    env["NO_COLOR"] = "1"
+
+    shell = _resolve_shell(shell, env)
+
+    args = [shell, "-NoProfile"]
+    # Only older Windows PowerShell (5.1) uses -OutputFormat Text successfully here
+    shell_name = os.path.basename(shell).lower().replace(".exe", "")
+    if shell_name == "powershell":
+        args.extend(["-OutputFormat", "Text"])
+    args.extend(["-EncodedCommand", encoded])
+    return args, env
+
+
 class PowerShellExecutor:
     """Static utility class for executing PowerShell commands."""
 
@@ -243,21 +270,8 @@ class PowerShellExecutor:
         them as distinct fields instead of one merged blob.
         """
         try:
-            encoded = encode_command(command)
-            env = _prepare_env()
-            # NO_COLOR suppresses ANSI escape sequences in pwsh 7.2+ (and many other CLI tools).
-            # PS5.1 has no ANSI output, so this is harmlessly ignored there.
-            # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_ansi_terminals#disabling-ansi-output
-            env["NO_COLOR"] = "1"
-
-            shell = _resolve_shell(shell, env)
-
-            args = [shell, "-NoProfile"]
-            # Only older Windows PowerShell (5.1) uses -OutputFormat Text successfully here
-            shell_name = os.path.basename(shell).lower().replace(".exe", "")
-            if shell_name == "powershell":
-                args.extend(["-OutputFormat", "Text"])
-            args.extend(["-EncodedCommand", encoded])
+            args, env = build_invocation(command, shell)
+            shell = args[0]
 
             result = run_with_graceful_timeout(
                 args,
@@ -303,3 +317,20 @@ class PowerShellExecutor:
                 "The Agentic Agentic Windows MCP server is currently running at a lower integrity level."
             )
         return output, status_code
+
+    @staticmethod
+    def start_background(command: str, shell: str | None = None):
+        """Start a command as a background job and return the job record.
+
+        The job's state follows the PowerShell process itself, so a command
+        that spawns a detached child (a dev server started with
+        ``Start-Process``, ``cmd /c start /b`` …) no longer blocks the caller
+        until a timeout the way the synchronous path does: the job reports
+        ``exited`` as soon as PowerShell exits, while any output a detached
+        grandchild still writes into the inherited pipes keeps landing in the
+        job's buffers.
+        """
+        from agentic_windows_mcp.powershell.jobs import JOBS
+
+        args, env = build_invocation(command, shell)
+        return JOBS.start(command, args, env, cwd=os.path.expanduser(path="~"))

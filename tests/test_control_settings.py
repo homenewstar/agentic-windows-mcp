@@ -114,6 +114,18 @@ def test_disabled_start_status_and_cleanup(monkeypatch):
         "idle_timeout_seconds": 2.5,
         "generation": 0,
         "wait_seconds": 0,
+        "health": {
+            "active_calls": 0,
+            "current_call": None,
+            "call_age_seconds": 0.0,
+            "last_call": None,
+            "last_call_seconds": None,
+            "watchdog_alive": False,
+            "monitor_beat_age_seconds": None,
+            "wedged": False,
+            "recovery_enabled": False,
+            "recovery_events": [],
+        },
     }
     assert owner.input_ledger.pending() == ("key",)
     assert not owner._suppress

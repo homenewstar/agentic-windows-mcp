@@ -49,6 +49,9 @@ def _as_region(value: list | str | None) -> list | None:
     return json.loads(value)
 
 
+DEFAULT_PAGE_SIZE = 500
+
+
 def capture_desktop_state(
     desktop: Desktop,
     *,
@@ -61,6 +64,8 @@ def capture_desktop_state(
     display: list[int] | None,
     region: list[int] | None,
     tool_name: str,
+    element_offset: int = 0,
+    element_limit: int | None = None,
 ):
     profile_enabled = _snapshot_profile_enabled()
     profile_started_at = time.perf_counter()
@@ -78,6 +83,12 @@ def capture_desktop_state(
     if width_reference_line and height_reference_line:
         grid_lines = (int(width_reference_line), int(height_reference_line))
 
+    paging = element_offset > 0 or element_limit is not None
+    page_size = element_limit if element_limit is not None else DEFAULT_PAGE_SIZE
+    # Paging deep must capture deep: raise the traversal budget so the
+    # requested page is populated instead of stopping at the default cap.
+    max_tree_elements = (element_offset + page_size) if paging else None
+
     desktop_state = desktop.get_state(
         use_vision=use_vision,
         use_dom=use_dom,
@@ -89,6 +100,7 @@ def capture_desktop_state(
         display_indices=display_indices,
         region=region,
         max_image_size=Size(width=MAX_IMAGE_WIDTH, height=MAX_IMAGE_HEIGHT),
+        max_tree_elements=max_tree_elements,
     )
     if profile_enabled:
         desktop_state_ms = (time.perf_counter() - stage_started_at) * 1000
@@ -127,6 +139,21 @@ def capture_desktop_state(
             display,
         )
 
+    interactive_page = None
+    if paging:
+        tree_state = desktop_state.tree_state
+        total_captured = len(tree_state.interactive_nodes)
+        page_end = min(element_offset + page_size, total_captured)
+        interactive_page = {
+            "text": tree_state.interactive_page_to_string(element_offset, page_size),
+            "offset": element_offset,
+            "page_end": page_end,
+            "total_captured": total_captured,
+            "capture_limit": tree_state.element_limit,
+            "truncated": tree_state.truncated,
+            "has_more": tree_state.truncated or total_captured > page_end,
+        }
+
     return {
         "desktop_state": desktop_state,
         "interactive_elements": interactive_elements,
@@ -137,6 +164,7 @@ def capture_desktop_state(
         "active_desktop": active_desktop,
         "all_desktops": all_desktops,
         "screenshot_bytes": screenshot_bytes,
+        "interactive_page": interactive_page,
     }
 
 
@@ -232,6 +260,24 @@ def build_snapshot_response(
 
     UI Tree:
     {semantic_tree or "No elements found."}''')
+
+    interactive_page = capture_result.get("interactive_page")
+    if interactive_page:
+        page = interactive_page
+        page_text = repair_surrogates(remove_private_use_chars(page["text"]))
+        header = (
+            f"Interactive Elements Page: showing {page['offset']}–{page['page_end']} "
+            f"of {page['total_captured']} captured elements "
+            f"(capture limit {page['capture_limit']})"
+        )
+        if page["truncated"]:
+            header += " — capture hit the element limit, so more elements exist beyond those captured"
+        response_text += f"\n\n{header}:\n{page_text}"
+        if page["has_more"]:
+            response_text += (
+                f"\nMore elements remain: call Snapshot with offset={page['page_end']} "
+                "to fetch the next page."
+            )
 
     response = [response_text]
     if screenshot_bytes:

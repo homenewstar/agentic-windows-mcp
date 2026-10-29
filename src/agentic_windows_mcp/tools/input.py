@@ -257,7 +257,7 @@ def register(
 
     @mcp.tool(
         name="Type",
-        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear=True to clear existing text first, False to append. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear=True to just empty a field.",
+        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear_first=True (alias: clear=True) to select-all and delete the field's existing content before typing — use it whenever the field may already hold text, e.g. a browser address bar; False appends. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear_first/clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear_first=True to just empty a field.",
         annotations=ToolAnnotations(
             title="Type",
             readOnlyHint=False,
@@ -272,6 +272,7 @@ def register(
         loc: list[int] | str | None = None,
         label: int | None = None,
         clear: bool | str = False,
+        clear_first: bool | str | None = None,
         caret_position: Literal["start", "idle", "end"] = "idle",
         press_enter: bool | str = False,
         ctx: Context = None,
@@ -279,6 +280,8 @@ def register(
         desktop = get_desktop()
         loc = _as_loc(loc)
         clear = _as_bool(clear, "clear")
+        if clear_first is not None:
+            clear = clear or _as_bool(clear_first, "clear_first")
         press_enter = _as_bool(press_enter, "press_enter")
         if loc is None and label is None:
             raise ValueError("Either loc or label must be provided.")

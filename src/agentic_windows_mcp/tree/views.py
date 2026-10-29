@@ -86,6 +86,31 @@ def _render_tree(nodes: list, meta_fn) -> str:
     return "\n".join(lines).rstrip()
 
 
+def _render_interactive_page(nodes: list, start_index: int) -> str:
+    """Render one page of the flat interactive list with global indices.
+
+    The index is the element's position in ``TreeState.interactive_nodes`` —
+    the same numbering the label-based tools (Click/Type ``label=``) resolve —
+    so a caller paging through a dense window can act on what it sees.
+    """
+    windows: dict[str, list] = {}
+    for idx, node in enumerate(nodes, start=start_index):
+        windows.setdefault(node.window_name, []).append((idx, node))
+
+    lines = []
+    for window_name, items in windows.items():
+        lines.append(f'window "{window_name}"')
+        for j, (idx, node) in enumerate(items):
+            connector = "└──" if j == len(items) - 1 else "├──"
+            coords = node.center.to_string()
+            ctrl = node.control_type.lower()
+            action = _action_for(ctrl)
+            meta = _node_meta_str(node.metadata)
+            lines.append(f'{connector} [{idx}] {coords} {ctrl} "{node.name}"  [action: {action}]{meta}')
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 def _truncation_note(element_limit: int) -> str:
     return (
         f"... [truncated: reached the {element_limit}-element capture limit — "
@@ -199,6 +224,13 @@ class TreeState:
         if self.truncated:
             text += "\n\n" + _truncation_note(self.element_limit)
         return text
+
+    def interactive_page_to_string(self, offset: int, limit: int) -> str:
+        """Render interactive elements ``[offset, offset+limit)`` with indices."""
+        page = self.interactive_nodes[offset:offset + limit]
+        if not page:
+            return "No interactive elements in this page range."
+        return _render_interactive_page(page, offset)
 
     def scrollable_elements_to_string(self) -> str:
         if not self.scrollable_nodes:

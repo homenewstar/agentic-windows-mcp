@@ -24,7 +24,7 @@ def register(mcp, *, get_desktop, get_analytics):
     global state_tool, screenshot_tool
     @mcp.tool(
         name='Snapshot',
-        description="Take a screenshot and inspect the screen. Keywords: screenshot, screen capture, see screen, observe, look, inspect, UI elements, what's on screen. Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot with cursor highlight. Set use_annotation=False to get a clean screenshot without bounding box overlays on UI elements (default: True, draws colored rectangles around detected elements). Set use_ui_tree=False for a faster screenshot-only snapshot when you do not need interactive or scrollable element extraction. Set width_reference_lines/height_reference_lines to overlay a grid for better spatial reasoning (make sure vision is enabled to use it). Set use_dom=True for browser content to get web page elements instead of browser UI. Set display=[0] or display=[0,1] using zero-based active Windows display indices; omit it to keep the default full-desktop behavior. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture and inspect only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Always call this first to understand the current desktop state before taking actions.",
+        description="Take a screenshot and inspect the screen. Keywords: screenshot, screen capture, see screen, observe, look, inspect, UI elements, what's on screen. Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot with cursor highlight. Set use_annotation=False to get a clean screenshot without bounding box overlays on UI elements (default: True, draws colored rectangles around detected elements). Set use_ui_tree=False for a faster screenshot-only snapshot when you do not need interactive or scrollable element extraction. Set width_reference_lines/height_reference_lines to overlay a grid for better spatial reasoning (make sure vision is enabled to use it). Set use_dom=True for browser content to get web page elements instead of browser UI. Set display=[0] or display=[0,1] using zero-based active Windows display indices; omit it to keep the default full-desktop behavior. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture and inspect only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Dense windows are captured up to an element limit (500 by default): set offset/limit to page through the full interactive element list — the response then includes an 'Interactive Elements Page' section with each element's global index (the same numbering label-based tools accept), the total captured count, and the next offset when more remain. Always call this first to understand the current desktop state before taking actions.",
         annotations=ToolAnnotations(
             title="Snapshot",
             readOnlyHint=True,
@@ -43,8 +43,16 @@ def register(mcp, *, get_desktop, get_analytics):
         height_reference_line: int | None = None,
         display: list[int] | None = None,
         region: list[int] | str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
         ctx: Context = None,
     ):
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be a non-negative integer")
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 5000
+        ):
+            raise ValueError("limit must be an integer between 1 and 5000")
         try:
             capture_result = capture_desktop_state(
                 get_desktop(),
@@ -57,6 +65,8 @@ def register(mcp, *, get_desktop, get_analytics):
                 display=display,
                 region=_as_region(region),
                 tool_name="Snapshot tool",
+                element_offset=offset,
+                element_limit=limit,
             )
         except Exception as e:
             logger.warning(

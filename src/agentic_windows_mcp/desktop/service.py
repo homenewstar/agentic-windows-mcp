@@ -147,6 +147,7 @@ class Desktop:
         display_indices: list[int] | None = None,
         region: list[int] | tuple[int, ...] | None = None,
         max_image_size: Size | None = None,
+        max_tree_elements: int | None = None,
     ) -> DesktopState:
         use_annotation = use_annotation is True or (
             isinstance(use_annotation, str) and use_annotation.lower() == "true"
@@ -240,7 +241,10 @@ class Desktop:
                     if self._filter_window_to_region(window, screenshot_region) is not None
                 )
             tree_state = self.tree.get_state(
-                tree_active_window_handle, list(other_windows_handles), use_dom=use_dom
+                tree_active_window_handle,
+                list(other_windows_handles),
+                use_dom=use_dom,
+                min_elements=max_tree_elements,
             )
         else:
             root_box = screenshot_region or self.tree.screen_box

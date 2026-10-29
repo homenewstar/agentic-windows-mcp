@@ -110,14 +110,18 @@ class Tree:
         self.element_budget=TreeElementBudget(resolve_max_tree_elements())
 
 
-    def get_state(self,active_window_handle:int|None,other_windows_handles:list[int],use_dom:bool=False)->TreeState:
+    def get_state(self,active_window_handle:int|None,other_windows_handles:list[int],use_dom:bool=False,min_elements:int|None=None)->TreeState:
         # Reset DOM state to prevent leaks and stale data
         self.dom = None
         self.dom_bounding_box = None
         self.dom_is_ia2 = False
         # Fresh budget per capture — huge lists/grids (e.g. thousands of rows) must not
-        # stall UI Automation or blow up the serialized response.
-        self.element_budget = TreeElementBudget(resolve_max_tree_elements())
+        # stall UI Automation or blow up the serialized response. Callers paging deep
+        # into the element list (Snapshot offset/limit) raise the floor via min_elements
+        # so later pages actually contain elements instead of hitting the default cap.
+        self.element_budget = TreeElementBudget(
+            max(resolve_max_tree_elements(), min_elements or 0)
+        )
         start_time = perf_counter()
         profile_enabled = _snapshot_profile_enabled()
 

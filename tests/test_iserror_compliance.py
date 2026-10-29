@@ -46,7 +46,10 @@ def test_shell_tool_error_is_error_true(monkeypatch, mcp):
     def _raise(*args, **kwargs):  # noqa: ARG001
         raise RuntimeError(error_msg)
 
-    monkeypatch.setattr(PowerShellExecutor, "execute_command", _raise)
+    # The tool calls execute_command_detailed (stdout/stderr separated, #5);
+    # patch that entry point — the contract under test is unchanged: an
+    # executor failure must surface as ToolError → isError=true on the wire.
+    monkeypatch.setattr(PowerShellExecutor, "execute_command_detailed", _raise)
     with pytest.raises(ToolError) as exc_info:
         asyncio.run(mcp.call_tool("PowerShell", {"command": "bad-cmd"}))
     assert error_msg in str(exc_info.value)

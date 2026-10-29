@@ -84,7 +84,7 @@ def register(mcp, *, get_desktop, get_analytics):
 
     @mcp.tool(
         name='Screenshot',
-        description="Captures a fast screenshot-first desktop snapshot with cursor position, desktop/window summaries, and an image. This path skips UI tree extraction for speed. Use Snapshot when you need interactive element ids, scrollable regions, or browser DOM extraction. Set display=[0] or display=[0,1] using zero-based active Windows display indices to capture only those monitors. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Note: the returned image may be downscaled for efficiency; when it is, multiply image coordinates by the ratio of original size to displayed size to get the actual screen coordinates for mouse actions (Click, Move, etc.).",
+        description="Captures a fast screenshot-first desktop snapshot with cursor position, desktop/window summaries, and an image. This path skips UI tree extraction for speed. Use Snapshot when you need interactive element ids, scrollable regions, or browser DOM extraction. Set display=[0] or display=[0,1] using zero-based active Windows display indices to capture only those monitors. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Every capture reports Captured At and a Frame Hash (sha256 of the frame): identical hashes mean identical frames. Set wait_for_change=True to keep re-capturing until the frame differs from the previous capture (up to wait_timeout seconds, default 10) — use it after an action when you need proof the screen actually updated. Note: the returned image may be downscaled for efficiency; when it is, multiply image coordinates by the ratio of original size to displayed size to get the actual screen coordinates for mouse actions (Click, Move, etc.).",
         annotations=ToolAnnotations(
             title="Screenshot",
             readOnlyHint=True,
@@ -100,8 +100,16 @@ def register(mcp, *, get_desktop, get_analytics):
         height_reference_line: int | None = None,
         display: list[int] | None = None,
         region: list[int] | str | None = None,
+        wait_for_change: bool | str = False,
+        wait_timeout: float = 10.0,
         ctx: Context = None,
     ):
+        if (
+            isinstance(wait_timeout, bool)
+            or not isinstance(wait_timeout, (int, float))
+            or not (0 < wait_timeout <= 60)
+        ):
+            raise ValueError("wait_timeout must be a number greater than 0 and at most 60")
         try:
             capture_result = capture_desktop_state(
                 get_desktop(),
@@ -114,6 +122,8 @@ def register(mcp, *, get_desktop, get_analytics):
                 display=display,
                 region=_as_region(region),
                 tool_name="Screenshot tool",
+                wait_for_change=_as_bool(wait_for_change),
+                wait_timeout=float(wait_timeout),
             )
         except Exception as e:
             logger.warning(

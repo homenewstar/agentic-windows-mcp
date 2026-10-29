@@ -9,9 +9,11 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 
 from fastmcp.utilities.types import Image
 from textwrap import dedent
+from agentic_windows_mcp.desktop.frame_tracking import FRAMES
 from agentic_windows_mcp.desktop.service import Desktop, Size
 from agentic_windows_mcp.desktop.utils import remove_private_use_chars, repair_surrogates
 
@@ -52,7 +54,7 @@ def _as_region(value: list | str | None) -> list | None:
 DEFAULT_PAGE_SIZE = 500
 
 
-def capture_desktop_state(
+def _capture_desktop_state_once(
     desktop: Desktop,
     *,
     use_vision: bool,
@@ -174,6 +176,53 @@ def capture_desktop_state(
     }
 
 
+def _note_frame(capture_result) -> None:
+    """Attach frame identity (content hash + capture time) to a result."""
+    data = capture_result.get("screenshot_bytes")
+    if not data:
+        capture_result["frame"] = None
+        return
+    captured_at = time.time()
+    digest, changed = FRAMES.note(data, captured_at)
+    capture_result["frame"] = {
+        "hash": digest,
+        "captured_at": captured_at,
+        "changed": changed,
+    }
+
+
+def capture_desktop_state(
+    desktop: Desktop,
+    *args,
+    wait_for_change: bool = False,
+    wait_timeout: float = 10.0,
+    **kwargs,
+):
+    """Capture once, stamping the frame with its hash and capture time.
+
+    With ``wait_for_change``, keep re-capturing until the frame differs
+    from the previous capture (or ``wait_timeout`` elapses) — the
+    guarantee a caller needs that a screenshot is newer than the last
+    action's effect, instead of a possibly-stale identical frame. The
+    outcome is recorded on the result's ``frame`` entry either way.
+    """
+    capture_result = _capture_desktop_state_once(desktop, *args, **kwargs)
+    _note_frame(capture_result)
+    if not wait_for_change or not capture_result.get("screenshot_bytes"):
+        return capture_result
+
+    started = time.monotonic()
+    deadline = started + wait_timeout
+    while not capture_result["frame"]["changed"] and time.monotonic() < deadline:
+        time.sleep(0.25)
+        capture_result = _capture_desktop_state_once(desktop, *args, **kwargs)
+        _note_frame(capture_result)
+    capture_result["frame"]["waited_change"] = bool(capture_result["frame"]["changed"])
+    capture_result["frame"]["wait_seconds"] = round(time.monotonic() - started, 2)
+    capture_result["frame"]["wait_timeout"] = wait_timeout
+    return capture_result
+
+
 def build_snapshot_response(
     capture_result: dict[str, object],
     *,
@@ -244,6 +293,21 @@ def build_snapshot_response(
         metadata_text += "Coordinate Space: Virtual desktop coordinates\n"
     if desktop_state.screenshot_backend:
         metadata_text += f"Screenshot Backend: {desktop_state.screenshot_backend}\n"
+    frame = capture_result.get("frame")
+    if frame:
+        captured_iso = datetime.fromtimestamp(frame["captured_at"]).astimezone().isoformat(timespec="seconds")
+        metadata_text += f"Captured At: {captured_iso}\n"
+        metadata_text += f"Frame Hash: sha256:{frame['hash']}\n"
+        if "waited_change" in frame:
+            if frame["waited_change"]:
+                metadata_text += (
+                    f"Wait For Change: frame changed after {frame['wait_seconds']}s of polling.\n"
+                )
+            else:
+                metadata_text += (
+                    f"Wait For Change: no change within {frame['wait_timeout']}s - this frame is "
+                    "identical to the previous capture.\n"
+                )
     refs_generation = capture_result.get("refs_generation")
     if refs_generation is not None:
         metadata_text += (

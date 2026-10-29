@@ -116,7 +116,7 @@ class TestTreeState:
         assert lines[0] == "window \"Notepad\""
         assert (
             lines[1]
-            == "\u2514\u2500\u2500 (200,100) button \"OK\"  [action: click]  "
+            == "\u2514\u2500\u2500 @e0 (200,100) button \"OK\"  [action: click]  "
             "[focused]  [shortcut:Alt+O]"
         )
 
@@ -135,10 +135,10 @@ class TestTreeState:
         lines = result.split("\n")
         assert (
             lines[1]
-            == "\u251c\u2500\u2500 (200,100) button \"OK\"  [action: click]  "
+            == "\u251c\u2500\u2500 @e0 (200,100) button \"OK\"  [action: click]  "
             "[focused]  [shortcut:Alt+O]"
         )
-        assert lines[2] == "\u2514\u2500\u2500 (200,100) button \"Cancel\"  [action: click]"
+        assert lines[2] == "\u2514\u2500\u2500 @e1 (200,100) button \"Cancel\"  [action: click]"
 
     def test_scrollable_elements_to_string_empty(self):
         ts = TreeState()
@@ -158,7 +158,7 @@ class TestTreeState:
         assert lines[0] == "window \"Notepad\""
         assert (
             lines[1]
-            == "\u2514\u2500\u2500 (200,100) pane \"Document\"  [action: click]  [v:42.5%]"
+            == "\u2514\u2500\u2500 @s1 (200,100) pane \"Document\"  [action: click]  [v:42.5%]"
         )
 
     def test_scrollable_elements_are_independent_from_interactive_count(
@@ -176,7 +176,7 @@ class TestTreeState:
         assert lines[0] == "window \"Notepad\""
         assert (
             lines[1]
-            == "\u2514\u2500\u2500 (200,100) pane \"Document\"  [action: click]  [v:42.5%]"
+            == "\u2514\u2500\u2500 @s3 (200,100) pane \"Document\"  [action: click]  [v:42.5%]"
         )
 
 

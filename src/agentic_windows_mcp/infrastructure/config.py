@@ -47,6 +47,11 @@ class ControlConfig:
     enabled: bool = True
     idle_timeout_seconds: float = 10.0
     policy: str = "relaxed"
+    # Issue #8: opt-in recovery when the control channel wedges. Off by
+    # default; when on, ControlStatus may invoke the registered scoped
+    # recovery (restart of the input monitor threads), rate-limited and
+    # always logged + surfaced in the status health block.
+    health_recovery: bool = False
 
 
 @dataclass
@@ -187,6 +192,8 @@ def load_config(path: Path | None) -> WindowsMCPConfig:
 
     if "enabled" in control:
         cfg.control.enabled = _strict_bool(control["enabled"], "control.enabled")
+    if "health_recovery" in control:
+        cfg.control.health_recovery = _strict_bool(control["health_recovery"], "control.health_recovery")
     if "idle_timeout_seconds" in control:
         cfg.control.idle_timeout_seconds = validate_idle_timeout(control["idle_timeout_seconds"])
 
@@ -257,6 +264,8 @@ def write_config(cfg: WindowsMCPConfig, path: Path) -> None:
         control_lines.append(f"enabled = {str(ctrl.enabled).lower()}")
     if ctrl.idle_timeout_seconds != default_ctrl.idle_timeout_seconds:
         control_lines.append(f"idle_timeout_seconds = {ctrl.idle_timeout_seconds}")
+    if ctrl.health_recovery != default_ctrl.health_recovery:
+        control_lines.append(f"health_recovery = {str(ctrl.health_recovery).lower()}")
     if control_lines:
         lines += ["[control]", *control_lines, ""]
 

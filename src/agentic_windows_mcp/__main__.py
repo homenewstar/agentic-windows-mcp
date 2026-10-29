@@ -341,6 +341,18 @@ def _build_mcp() -> FastMCP:
         controller.enabled = _control_config.enabled
         controller.policy = _control_config.policy
         controller.idle_timeout_seconds = _control_config.idle_timeout_seconds
+        # Issue #8: wedged-channel recovery is opt-in per machine
+        # ([control] health_recovery, default off). The scoped action is a
+        # restart of this process's input monitor/watchdog threads only;
+        # attempts are rate-limited, logged, and listed by ControlStatus.
+        controller.health_recovery = _control_config.health_recovery
+        if _control_config.health_recovery:
+            def _restart_control_monitors() -> str:
+                controller.stop()
+                controller.start()
+                return "input monitor threads restarted"
+
+            controller.set_recovery_handler(_restart_control_monitors)
 
         try:
             if controller.enabled:

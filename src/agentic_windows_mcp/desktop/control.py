@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import math
 import queue
 import threading
@@ -25,6 +26,9 @@ from agentic_windows_mcp.desktop.control_win32 import (
     _interactive_desktop,
     run_input_monitor,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ControlBlocked(RuntimeError):
@@ -69,6 +73,16 @@ class ControlCoordinator:
         self._watchdog: threading.Thread | None = None
         self._startup_error: Exception | None = None
         self._thread_beat = 0.0
+        # Channel health (issue #8): per-call timing + opt-in recovery.
+        self._call_started_at = 0.0
+        self._call_name: str | None = None
+        self._last_call_name: str | None = None
+        self._last_call_seconds: float | None = None
+        self.health_recovery = False
+        self._recovery_handler: Callable[[], str] | None = None
+        self._recovery_events: list[dict] = []
+        self._last_recovery_at = 0.0
+        self._recovery_lock = threading.Lock()
         self._suppress = False  # Atomic snapshot read by the hook callbacks.
         self._deadline = 0.0
         self._emergency = False
@@ -179,6 +193,84 @@ class ControlCoordinator:
             generation = self._generation
         self.arm_visible(generation)
 
+    def _health_locked(self, now: float) -> dict:
+        """Channel health for ControlStatus (issue #8).
+
+        ``wedged`` is a conservative verdict: the monitor watchdog thread
+        died, its heartbeat went stale, or one call has been in flight far
+        beyond any tool's own timeout. ControlStatus itself never goes
+        through the gate, so it can report this even while wedged.
+        """
+        call_age = (
+            now - self._call_started_at
+            if self._active_calls and self._call_started_at
+            else 0.0
+        )
+        beat_age = now - self._thread_beat if self._thread_beat else None
+        watchdog_alive = bool(self._watchdog and self._watchdog.is_alive())
+        wedged = bool(
+            self.enabled
+            and not self._stop.is_set()
+            and (
+                (self._watchdog is not None and not watchdog_alive)
+                or (beat_age is not None and beat_age > 30.0)
+                or call_age > 120.0
+            )
+        )
+        return {
+            "active_calls": self._active_calls,
+            "current_call": self._call_name if self._active_calls else None,
+            "call_age_seconds": round(call_age, 2),
+            "last_call": self._last_call_name,
+            "last_call_seconds": (
+                round(self._last_call_seconds, 3)
+                if self._last_call_seconds is not None
+                else None
+            ),
+            "watchdog_alive": watchdog_alive,
+            "monitor_beat_age_seconds": (
+                round(beat_age, 1) if beat_age is not None else None
+            ),
+            "wedged": wedged,
+            "recovery_enabled": bool(self.health_recovery and self._recovery_handler),
+            "recovery_events": list(self._recovery_events[-5:]),
+        }
+
+    def set_recovery_handler(self, handler: Callable[[], str] | None) -> None:
+        """Register the scoped recovery action used when the channel wedges.
+
+        Only consulted when ``health_recovery`` is enabled in config; the
+        handler runs at most once per cooldown and every attempt is logged
+        and surfaced in the status health block.
+        """
+        self._recovery_handler = handler
+
+    def _maybe_recover(self, result: dict) -> bool:
+        health = result.get("health") or {}
+        if not (self.health_recovery and self._recovery_handler and health.get("wedged")):
+            return False
+        if time.monotonic() - self._last_recovery_at < 120.0:
+            return False
+        if not self._recovery_lock.acquire(blocking=False):
+            return False
+        try:
+            self._last_recovery_at = time.monotonic()
+            try:
+                outcome = self._recovery_handler()
+                event = {"action": "wedged_channel_recovery", "outcome": str(outcome)}
+            except Exception as e:  # Recovery must never take status down.
+                event = {
+                    "action": "wedged_channel_recovery",
+                    "outcome": f"error: {type(e).__name__}: {e}",
+                }
+            event["at_monotonic"] = round(self._last_recovery_at, 1)
+            with self._lock:
+                self._recovery_events.append(event)
+            logger.warning("Control channel recovery attempt: %s", event)
+        finally:
+            self._recovery_lock.release()
+        return True
+
     def _snapshot_locked(self, now: float) -> dict:
         state = (
             "disabled"
@@ -200,6 +292,7 @@ class ControlCoordinator:
             "enabled": self.enabled,
             "policy": self.policy,
             "idle_timeout_seconds": self.idle_timeout_seconds,
+            "health": self._health_locked(now),
         }
 
     def status(self) -> dict:
@@ -214,6 +307,11 @@ class ControlCoordinator:
             result = self._snapshot_locked(now)
         if changed:
             self._notify(result)
+        if self._maybe_recover(result):
+            # Surface the attempt (and the post-recovery state) in the
+            # same response instead of making the caller poll again.
+            with self._lock:
+                result = self._snapshot_locked(time.monotonic())
         return result
 
     def _notify(self, result: dict) -> None:
@@ -317,6 +415,9 @@ class ControlCoordinator:
                 raise ControlBlocked("CONTROL_UNAVAILABLE", self._snapshot_locked(now))
             changed = self._set_locked("ai") or changed
             self._active_calls += 1
+            if self._active_calls == 1:
+                self._call_started_at = now
+                self._call_name = name
             token = self._generation
             result = self._snapshot_locked(now)
         if changed:
@@ -375,6 +476,11 @@ class ControlCoordinator:
     def end_call(self, token: int) -> None:
         with self._lock:
             self._active_calls = max(0, self._active_calls - 1)
+            if not self._active_calls and self._call_started_at:
+                self._last_call_seconds = time.monotonic() - self._call_started_at
+                self._last_call_name = self._call_name
+                self._call_started_at = 0.0
+                self._call_name = None
             if self._state in ("ai", "takeover_pending") and not self._active_calls:
                 self._lease_until = time.monotonic() + 15.0
 

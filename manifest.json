@@ -148,6 +148,18 @@
       "description": "Enters text into multiple input fields at specified coordinates locs=[[x,y,text], ...] or using labels=[[label,text], ...]. Provide either locs or labels."
     },
     {
+      "name": "JobStatus",
+      "description": "Reports a background PowerShell job's state (running/exited), exit code, elapsed time and buffered output size. Job ids come from the PowerShell tool with background=True."
+    },
+    {
+      "name": "JobOutput",
+      "description": "Reads a background PowerShell job's buffered stdout/stderr incrementally via character offsets, so long-running commands can be followed without re-reading everything."
+    },
+    {
+      "name": "JobStop",
+      "description": "Terminates a background PowerShell job and its whole process tree."
+    },
+    {
       "name": "Clipboard",
       "description": "Manages Windows clipboard operations. Use mode=\"get\" to read current clipboard content, mode=\"set\" to set clipboard text."
     },

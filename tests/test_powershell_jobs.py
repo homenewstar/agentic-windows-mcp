@@ -66,8 +66,14 @@ class TestBackgroundJobs:
     def test_job_output_is_incremental(self):
         from agentic_windows_mcp.powershell import PowerShellExecutor
 
+        # Write via [Console]::Out with explicit Flush: Write-Output goes
+        # through the formatting pipeline, which may buffer both lines and
+        # flush them together when stdout is a pipe — that would make the
+        # mid-run read nondeterministic.
         job = PowerShellExecutor.start_background(
-            "Write-Output 'line-one'; Start-Sleep -Seconds 3; Write-Output 'line-two'"
+            "[Console]::Out.WriteLine('line-one'); [Console]::Out.Flush(); "
+            "Start-Sleep -Seconds 3; "
+            "[Console]::Out.WriteLine('line-two'); [Console]::Out.Flush()"
         )
         first = ""
         deadline = time.monotonic() + 10

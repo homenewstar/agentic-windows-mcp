@@ -137,9 +137,14 @@ class Job:
 def _pump(stream, buffer: StreamBuffer) -> None:
     """Drain one pipe into its buffer until EOF (daemon thread)."""
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    # read1, not read: BufferedReader.read(n) keeps filling until it has n
+    # bytes or EOF, which would hold early output hostage until the process
+    # exits — exactly the latency JobOutput exists to avoid. read1 returns
+    # after a single raw read, as soon as any bytes are available.
+    read_once = getattr(stream, "read1", None) or stream.read
     try:
         while True:
-            chunk = stream.read(4096)
+            chunk = read_once(4096)
             if not chunk:
                 break
             buffer.append(decoder.decode(chunk))

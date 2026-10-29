@@ -148,6 +148,18 @@
       "description": "Enters text into multiple input fields at specified coordinates locs=[[x,y,text], ...] or using labels=[[label,text], ...]. Provide either locs or labels."
     },
     {
+      "name": "Invoke",
+      "description": "Invokes a UI element by its Snapshot ref (e.g. '@e12') via the UIA InvokePattern — no coordinates, so it lands even if the window moved. Returns STALE_REF when the element changed since the snapshot."
+    },
+    {
+      "name": "SetValue",
+      "description": "Sets a UI element's value by its Snapshot ref via the UIA ValuePattern, replacing content directly without keystroke simulation."
+    },
+    {
+      "name": "Toggle",
+      "description": "Toggles a checkbox or switch by its Snapshot ref via the UIA TogglePattern and reports the resulting state."
+    },
+    {
       "name": "JobStatus",
       "description": "Reports a background PowerShell job's state (running/exited), exit code, elapsed time and buffered output size. Job ids come from the PowerShell tool with background=True."
     },

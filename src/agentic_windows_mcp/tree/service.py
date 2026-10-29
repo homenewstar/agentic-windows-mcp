@@ -91,7 +91,7 @@ def _runtime_identity(node: Any) -> Optional[tuple[int, ...]]:
     """
     try:
         parts = tuple(int(part) for part in node.GetCachedPropertyValue(PropertyId.RuntimeIdProperty))
-    except (TypeError, ValueError, COMError):
+    except Exception:
         return None
     return parts or None
 
@@ -434,7 +434,9 @@ class Tree:
                         'bounding_box':bounding_box,
                         'center':center,
                         'window_name':window_name,
-                        'metadata':metadata
+                        'metadata':metadata,
+                    'runtime_id':_runtime_identity(child),
+                    'window_handle':window_handle
                     }))
         elif self.element_has_child_element(node,'link','heading'):
             dom_interactive_nodes.pop()
@@ -455,7 +457,9 @@ class Tree:
                     'bounding_box':bounding_box,
                     'center':center,
                     'window_name':window_name,
-                    'metadata':metadata
+                    'metadata':metadata,
+                'runtime_id':_runtime_identity(node),
+                'window_handle':window_handle
                 }))
         else:
             if not node.Name.strip():
@@ -468,7 +472,8 @@ class Tree:
                     is_dom:bool=False, is_dialog:bool=False,
                     element_cache_req:Optional[Any]=None, children_cache_req:Optional[Any]=None,
                     current_semantic_node:'Optional[SemanticNode]'=None,
-                    ancestor_runtime_ids:Optional[frozenset[tuple[int, ...]]]=None):
+                    ancestor_runtime_ids:Optional[frozenset[tuple[int, ...]]]=None,
+                    window_handle:int=0):
         try:
             # Build cached control if caching is enabled
             if not hasattr(node, '_is_cached') and element_cache_req:
@@ -533,7 +538,9 @@ class Tree:
                                 }),
                                 'center':center,
                                 'window_name':window_name,
-                                'metadata':metadata
+                                'metadata':metadata,
+                                'runtime_id':_runtime_identity(node),
+                                'window_handle':window_handle
                             }))
                             if current_semantic_node is not None and not is_dom:
                                 current_semantic_node.add_child(SemanticNode(
@@ -777,7 +784,9 @@ class Tree:
                                     'bounding_box':bounding_box,
                                     'center':center,
                                     'window_name':window_name,
-                                    'metadata':metadata
+                                    'metadata':metadata,
+                                    'runtime_id':_runtime_identity(node),
+                                    'window_handle':window_handle
                                 })
                                 self.element_budget.try_consume()
                                 dom_interactive_nodes.append(tree_node)
@@ -793,7 +802,9 @@ class Tree:
                                         'bounding_box':bounding_box,
                                         'center':center,
                                         'window_name':window_name,
-                                        'metadata':metadata
+                                        'metadata':metadata,
+                                        'runtime_id':_runtime_identity(node),
+                                        'window_handle':window_handle
                                     })
                                     self.element_budget.try_consume()
                                     interactive_nodes.append(tree_node)
@@ -876,7 +887,7 @@ class Tree:
                         height=bounding_box.height())
                         self.dom=child
                         # enter DOM subtree
-                        self.tree_traversal(child, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=True, is_dialog=is_dialog, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=None, ancestor_runtime_ids=ancestor_runtime_ids)
+                        self.tree_traversal(child, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=True, is_dialog=is_dialog, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=None, ancestor_runtime_ids=ancestor_runtime_ids, window_handle=window_handle)
                     # Check if the child is a dialog
                     elif isinstance(child,WindowControl):
                         if not child.CachedIsOffscreen:
@@ -896,10 +907,10 @@ class Tree:
                                 if is_modal:
                                     interactive_nodes.clear()
                         # enter dialog subtree
-                        self.tree_traversal(child, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=is_dom, is_dialog=True, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=semantic_parent, ancestor_runtime_ids=ancestor_runtime_ids)
+                        self.tree_traversal(child, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=is_dom, is_dialog=True, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=semantic_parent, ancestor_runtime_ids=ancestor_runtime_ids, window_handle=window_handle)
                     else:
                         # normal non-dialog children
-                        self.tree_traversal(child, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=is_dom, is_dialog=is_dialog, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=semantic_parent, ancestor_runtime_ids=ancestor_runtime_ids)
+                        self.tree_traversal(child, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=is_dom, is_dialog=is_dialog, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=semantic_parent, ancestor_runtime_ids=ancestor_runtime_ids, window_handle=window_handle)
                 except TypeError as e:
                     if not _is_comtypes_variant_ord_typeerror(e):
                         raise
@@ -968,7 +979,7 @@ class Tree:
                     window_name=window_name,
                 )
 
-            self.tree_traversal(node, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=False, is_dialog=False, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=window_sem_node)
+            self.tree_traversal(node, window_bounding_box, window_name, is_browser, interactive_nodes, scrollable_nodes, dom_interactive_nodes, dom_informative_nodes, is_dom=False, is_dialog=False, element_cache_req=element_cache_req, children_cache_req=children_cache_req, current_semantic_node=window_sem_node, window_handle=handle)
 
             # IA2 fallback: Firefox doesn't expose RootWebArea via UIA, so the traversal
             # above finds no DOM content. If this is a browser window and UIA gave us no

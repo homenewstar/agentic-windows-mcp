@@ -29,14 +29,14 @@ def _state(n: int) -> TreeState:
 class TestInteractivePage:
     def test_first_page_carries_global_indices(self):
         text = _state(10).interactive_page_to_string(0, 3)
-        assert "[0]" in text and "[2]" in text
-        assert "[3]" not in text
+        assert "@e0" in text and "@e2" in text
+        assert "@e3" not in text
         assert 'window "Dense Window"' in text
 
     def test_later_page_continues_numbering(self):
         text = _state(10).interactive_page_to_string(7, 3)
-        assert "[7]" in text and "[9]" in text
-        assert "[6]" not in text
+        assert "@e7" in text and "@e9" in text
+        assert "@e6" not in text
 
     def test_page_beyond_end_is_explicit(self):
         text = _state(4).interactive_page_to_string(10, 5)
@@ -44,7 +44,7 @@ class TestInteractivePage:
 
     def test_partial_last_page(self):
         text = _state(8).interactive_page_to_string(6, 500)
-        assert "[6]" in text and "[7]" in text
+        assert "@e6" in text and "@e7" in text
 
 
 class TestBudgetFloor:

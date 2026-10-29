@@ -20,6 +20,7 @@ from agentic_windows_mcp.infrastructure import safe_get
 from agentic_windows_mcp.desktop import control_overlay
 from urllib.parse import urljoin
 from locale import getpreferredencoding
+from dataclasses import dataclass
 from typing import Literal
 from markdownify import markdownify
 from fuzzywuzzy import process
@@ -129,11 +130,55 @@ def _escape_text_for_sendkeys(text: str) -> str:
     return "".join(result)
 
 
+class StaleRefError(RuntimeError):
+    """An element ref (@e/@s) no longer resolves to its snapshot element."""
+
+
+@dataclass
+class ElementRef:
+    """Identity of one snapshot element, captured for later re-acquisition."""
+
+    label: int
+    runtime_id: tuple | None
+    window_handle: int
+    name: str
+    control_type: str
+
+
+def find_control_by_runtime_id(root, runtime_id: tuple, max_nodes: int = 20000):
+    """Breadth-first search of a UIA subtree for an exact RuntimeId match.
+
+    Returns the live control, or None when the element is gone (closed,
+    re-rendered, navigated away) — the caller turns that into STALE_REF.
+    """
+    visited = 0
+    queue = [root]
+    while queue:
+        control = queue.pop(0)
+        visited += 1
+        if visited > max_nodes:
+            return None
+        try:
+            if tuple(control.GetRuntimeId()) == tuple(runtime_id):
+                return control
+        except Exception:
+            continue
+        try:
+            queue.extend(control.GetChildren())
+        except Exception:
+            continue
+    return None
+
+
 class Desktop:
     def __init__(self):
         self.encoding = getpreferredencoding()
         self.tree = Tree(self)
         self.desktop_state = None
+        # Element-ref registry (issue #3): replaced wholesale by every
+        # Snapshot capture; refs from older snapshots stop resolving.
+        self._refs_generation = 0
+        self._element_refs: dict[int, ElementRef] = {}
 
     def get_state(
         self,
@@ -750,6 +795,155 @@ class Desktop:
                     raise IndexError(f"Label {label} out of range")
             results.append((element_node.center.x, element_node.center.y))
         return results
+
+    # ---- Element refs (issue #3) ----
+
+    @property
+    def refs_generation(self) -> int:
+        return self._refs_generation
+
+    def register_element_refs(self, tree_state) -> int:
+        """Snapshot the identity of every labelled element for ref tools.
+
+        Called by the Snapshot tool on each capture; replaces the previous
+        registry wholesale, so refs issued by an older snapshot stop
+        resolving (callers get STALE_REF and re-snapshot).
+        """
+        self._refs_generation += 1
+        refs: dict[int, ElementRef] = {}
+        interactive = list(getattr(tree_state, "interactive_nodes", []) or [])
+        scrollable = list(getattr(tree_state, "scrollable_nodes", []) or [])
+        for label, node in enumerate(interactive):
+            refs[label] = ElementRef(
+                label=label,
+                runtime_id=getattr(node, "runtime_id", None),
+                window_handle=getattr(node, "window_handle", 0),
+                name=node.name,
+                control_type=node.control_type,
+            )
+        base = len(interactive)
+        for j, node in enumerate(scrollable):
+            label = base + j
+            refs[label] = ElementRef(
+                label=label,
+                runtime_id=getattr(node, "runtime_id", None),
+                window_handle=getattr(node, "window_handle", 0),
+                name=node.name,
+                control_type=node.control_type,
+            )
+        self._element_refs = refs
+        return self._refs_generation
+
+    def resolve_element_ref(self, label: int, snapshot: int | None = None):
+        """Re-acquire the live UIA control behind a snapshot ref.
+
+        Raises StaleRefError when the ref's snapshot was superseded, the
+        element has no re-acquirable identity, its window is gone, the
+        element itself no longer exists, or it now shows a different name
+        than the snapshot recorded — in every case the safe recovery is a
+        fresh Snapshot, never a blind coordinate click.
+        """
+        if snapshot is not None and snapshot != self._refs_generation:
+            raise StaleRefError(
+                f"STALE_REF: ref is from snapshot {snapshot}, but the current snapshot "
+                f"is {self._refs_generation}. Take a new Snapshot and use its refs."
+            )
+        ref = self._element_refs.get(label)
+        if ref is None:
+            raise StaleRefError(
+                f"STALE_REF: no element with label {label} in snapshot "
+                f"{self._refs_generation}. Take a new Snapshot."
+            )
+        if ref.runtime_id is None or not ref.window_handle:
+            raise StaleRefError(
+                f"STALE_REF: element {label} ({ref.control_type} \"{ref.name}\") has no UIA "
+                "identity to re-acquire (extracted text or IA2/MSAA node). "
+                "Use Click with its coordinates instead."
+            )
+        root = uia.ControlFromHandle(ref.window_handle)
+        if root is None:
+            raise StaleRefError(
+                f"STALE_REF: the window containing element {label} no longer exists. "
+                "Take a new Snapshot."
+            )
+        control = find_control_by_runtime_id(root, ref.runtime_id)
+        if control is None:
+            raise StaleRefError(
+                f"STALE_REF: element {label} ({ref.control_type} \"{ref.name}\") no longer "
+                "exists — the UI changed since the snapshot. Take a new Snapshot."
+            )
+        try:
+            live_name = (control.Name or "").strip()
+        except Exception:
+            live_name = ref.name
+        if ref.name and live_name != ref.name:
+            raise StaleRefError(
+                f"STALE_REF: element {label} now shows \"{live_name}\" instead of "
+                f"\"{ref.name}\" — the UI changed since the snapshot. Take a new Snapshot."
+            )
+        return ref, control
+
+    def invoke_element(self, label: int, snapshot: int | None = None) -> ElementRef:
+        owner = get_controller()
+        owner.checkpoint_current()
+        ref, control = self.resolve_element_ref(label, snapshot)
+        pattern = control.GetPattern(uia.PatternId.InvokePattern)
+        if pattern is None:
+            raise ValueError(
+                f"UNSUPPORTED_PATTERN: element {label} ({ref.control_type} \"{ref.name}\") "
+                "does not support InvokePattern. Use Click with its coordinates instead."
+            )
+        owner.checkpoint_current()
+        if pattern.Invoke() is False:
+            raise RuntimeError(f"InvokePattern.Invoke failed for element {label}")
+        owner.record_step_current()
+        return ref
+
+    def set_element_value(
+        self, label: int, value: str, snapshot: int | None = None
+    ) -> ElementRef:
+        owner = get_controller()
+        owner.checkpoint_current()
+        ref, control = self.resolve_element_ref(label, snapshot)
+        pattern = control.GetPattern(uia.PatternId.ValuePattern)
+        legacy = None
+        if pattern is None:
+            legacy = control.GetPattern(uia.PatternId.LegacyIAccessiblePattern)
+        if pattern is None and legacy is None:
+            raise ValueError(
+                f"UNSUPPORTED_PATTERN: element {label} ({ref.control_type} \"{ref.name}\") "
+                "supports neither ValuePattern nor LegacyIAccessible. "
+                "Use the Type tool with its coordinates instead."
+            )
+        owner.checkpoint_current()
+        try:
+            ok = pattern.SetValue(value) if pattern is not None else legacy.SetValue(value)
+        except Exception as e:
+            raise RuntimeError(f"Setting the value of element {label} failed: {e}") from e
+        if ok is False:
+            raise RuntimeError(f"Setting the value of element {label} was rejected")
+        owner.record_step_current()
+        return ref
+
+    def toggle_element(self, label: int, snapshot: int | None = None) -> tuple[ElementRef, object]:
+        owner = get_controller()
+        owner.checkpoint_current()
+        ref, control = self.resolve_element_ref(label, snapshot)
+        pattern = control.GetPattern(uia.PatternId.TogglePattern)
+        if pattern is None:
+            raise ValueError(
+                f"UNSUPPORTED_PATTERN: element {label} ({ref.control_type} \"{ref.name}\") "
+                "does not support TogglePattern. Use Click with its coordinates instead."
+            )
+        owner.checkpoint_current()
+        if pattern.Toggle() is False:
+            raise RuntimeError(f"TogglePattern.Toggle failed for element {label}")
+        owner.record_step_current()
+        try:
+            state = pattern.ToggleState
+        except Exception:
+            state = None
+        return ref, state
 
     @staticmethod
     def _validate_screen_point(x: int, y: int) -> None:

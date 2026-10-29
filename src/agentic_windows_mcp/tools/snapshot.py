@@ -67,6 +67,7 @@ def register(mcp, *, get_desktop, get_analytics):
                 tool_name="Snapshot tool",
                 element_offset=offset,
                 element_limit=limit,
+                register_refs=True,
             )
         except Exception as e:
             logger.warning(

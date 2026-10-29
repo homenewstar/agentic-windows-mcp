@@ -66,22 +66,22 @@ def _scroll_meta_str(metadata: dict[str, Any]) -> str:
     return "  " + "  ".join(f"[{p}]" for p in parts)
 
 
-def _render_tree(nodes: list, meta_fn) -> str:
+def _render_tree(nodes: list, meta_fn, ref_prefix: str = "@e", index_offset: int = 0) -> str:
     windows: dict[str, list] = {}
-    for node in nodes:
-        windows.setdefault(node.window_name, []).append(node)
+    for idx, node in enumerate(nodes):
+        windows.setdefault(node.window_name, []).append((idx + index_offset, node))
 
     lines = []
     for window_name, window_nodes in windows.items():
         lines.append(f'window "{window_name}"')
-        for i, node in enumerate(window_nodes):
+        for i, (idx, node) in enumerate(window_nodes):
             connector = "└──" if i == len(window_nodes) - 1 else "├──"
             coords = node.center.to_string()
             ctrl = node.control_type.lower()
             name = node.name
             action = _action_for(ctrl)
             meta = meta_fn(node.metadata)
-            lines.append(f'{connector} {coords} {ctrl} "{name}"  [action: {action}]{meta}')
+            lines.append(f'{connector} {ref_prefix}{idx} {coords} {ctrl} "{name}"  [action: {action}]{meta}')
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -106,7 +106,7 @@ def _render_interactive_page(nodes: list, start_index: int) -> str:
             ctrl = node.control_type.lower()
             action = _action_for(ctrl)
             meta = _node_meta_str(node.metadata)
-            lines.append(f'{connector} [{idx}] {coords} {ctrl} "{node.name}"  [action: {action}]{meta}')
+            lines.append(f'{connector} @e{idx} {coords} {ctrl} "{node.name}"  [action: {action}]{meta}')
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -235,7 +235,14 @@ class TreeState:
     def scrollable_elements_to_string(self) -> str:
         if not self.scrollable_nodes:
             return "No scrollable elements"
-        text = _render_tree(self.scrollable_nodes, _scroll_meta_str)
+        # Scrollable refs share the label space of the interactive list: the
+        # first scrollable element's label is len(interactive_nodes).
+        text = _render_tree(
+            self.scrollable_nodes,
+            _scroll_meta_str,
+            ref_prefix="@s",
+            index_offset=len(self.interactive_nodes),
+        )
         if self.truncated:
             text += "\n\n" + _truncation_note(self.element_limit)
         return text
@@ -294,6 +301,12 @@ class TreeElementNode:
     control_type: str = ""
     window_name: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    # UIA identity captured during traversal (issue #3): lets the ref-based
+    # tools (Invoke/SetValue/Toggle) re-acquire this exact element later and
+    # detect when it is gone. None for nodes without a UIA element behind
+    # them (extracted words, IA2/MSAA nodes).
+    runtime_id: Optional[tuple] = None
+    window_handle: int = 0
 
     def update_from_node(self, node: "TreeElementNode"):
         self.name = node.name
@@ -302,6 +315,8 @@ class TreeElementNode:
         self.bounding_box = node.bounding_box
         self.center = node.center
         self.metadata = node.metadata
+        self.runtime_id = node.runtime_id
+        self.window_handle = node.window_handle
 
 
 @dataclass
@@ -312,6 +327,8 @@ class ScrollElementNode:
     bounding_box: BoundingBox
     center: Center
     metadata: dict[str, Any] = field(default_factory=dict)
+    runtime_id: Optional[tuple] = None
+    window_handle: int = 0
 
 
 @dataclass

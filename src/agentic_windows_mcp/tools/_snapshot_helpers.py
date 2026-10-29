@@ -66,6 +66,7 @@ def capture_desktop_state(
     tool_name: str,
     element_offset: int = 0,
     element_limit: int | None = None,
+    register_refs: bool = False,
 ):
     profile_enabled = _snapshot_profile_enabled()
     profile_started_at = time.perf_counter()
@@ -139,6 +140,10 @@ def capture_desktop_state(
             display,
         )
 
+    refs_generation = None
+    if register_refs and use_ui_tree:
+        refs_generation = desktop.register_element_refs(desktop_state.tree_state)
+
     interactive_page = None
     if paging:
         tree_state = desktop_state.tree_state
@@ -165,6 +170,7 @@ def capture_desktop_state(
         "all_desktops": all_desktops,
         "screenshot_bytes": screenshot_bytes,
         "interactive_page": interactive_page,
+        "refs_generation": refs_generation,
     }
 
 
@@ -238,6 +244,15 @@ def build_snapshot_response(
         metadata_text += "Coordinate Space: Virtual desktop coordinates\n"
     if desktop_state.screenshot_backend:
         metadata_text += f"Screenshot Backend: {desktop_state.screenshot_backend}\n"
+    refs_generation = capture_result.get("refs_generation")
+    if refs_generation is not None:
+        metadata_text += (
+            f"Snapshot ID: {refs_generation}\n"
+            "Element Refs: @e<label> (interactive) and @s<label> (scrollable) refer to the "
+            "elements listed below and stay valid until the next Snapshot. Prefer the "
+            "ref tools (Invoke/SetValue/Toggle) over coordinates when an element offers "
+            f"the pattern; pass snapshot={refs_generation} to guard against staleness.\n"
+        )
     if ui_detail_note:
         metadata_text += f"{ui_detail_note}\n"
 
@@ -260,6 +275,14 @@ def build_snapshot_response(
 
     UI Tree:
     {semantic_tree or "No elements found."}''')
+        if refs_generation is not None:
+            response_text += dedent(f'''
+
+    Interactive Elements:
+    {interactive_elements}
+
+    Scrollable Elements:
+    {scrollable_elements}''')
 
     interactive_page = capture_result.get("interactive_page")
     if interactive_page:

@@ -3,10 +3,12 @@
 import json
 import math
 import re
+import socket
 import time
 from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
+import psutil
 from mcp.types import ToolAnnotations
 from agentic_windows_mcp.desktop.utils import as_bool as _as_bool
 from agentic_windows_mcp.infrastructure import with_analytics
@@ -19,7 +21,32 @@ WaitForCondition = Literal[
     "element_exists",
     "element_enabled",
     "focused_element",
+    "window_title",
+    "tcp_port_open",
+    "process_running",
 ]
+
+# Conditions answered without a desktop capture: polling them must stay
+# cheap and must not hang on a busy UI stack.
+STATELESS_CONDITIONS = {"tcp_port_open", "process_running"}
+
+
+def _check_tcp_port(host: str, port: int) -> tuple[bool, str]:
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True, f"{host}:{port} accepted a connection"
+    except OSError as e:
+        return False, f"{host}:{port} not reachable ({type(e).__name__})"
+
+
+def _check_process(name: str) -> tuple[bool, str]:
+    wanted = name.casefold()
+    variants = {wanted} if wanted.endswith(".exe") else {wanted, wanted + ".exe"}
+    for proc in psutil.process_iter(["name", "pid"]):
+        pname = (proc.info.get("name") or "").casefold()
+        if pname in variants:
+            return True, f"process {proc.info['name']!r} is running (pid {proc.info['pid']})"
+    return False, f"process {name!r} is not running"
 
 
 def _resolve_label(desktop: Any, label: int) -> list[int]:
@@ -147,6 +174,18 @@ def _matches_wait_condition(
             return True, f"active window matched {active_name!r}"
         return False, f"active window was {active_name!r}"
 
+    if condition == "window_title":
+        expected = window_name or text
+        names = []
+        active_window = getattr(desktop_state, "active_window", None)
+        if active_window is not None:
+            names.append(active_window.name)
+        names.extend(w.name for w in getattr(desktop_state, "windows", []))
+        for name in names:
+            if _text_matches(name, expected):
+                return True, f"window titled {name!r} exists"
+        return False, f"no window title matched {expected!r}"
+
     if condition in {"element_exists", "element_enabled"}:
         for node in _iter_nodes(desktop_state):
             if _node_matches(node, text, window_name):
@@ -169,6 +208,8 @@ def _validate_wait_for_args(
     window_name: str | None,
     timeout: float,
     interval: float,
+    port: int | None = None,
+    process_name: str | None = None,
 ) -> WaitForCondition:
     _validate_finite_number(timeout, "timeout")
     _validate_finite_number(interval, "interval")
@@ -180,6 +221,11 @@ def _validate_wait_for_args(
         "element": "element_exists",
         "enabled": "element_enabled",
         "focused": "focused_element",
+        "title": "window_title",
+        "window_exists": "window_title",
+        "port": "tcp_port_open",
+        "tcp": "tcp_port_open",
+        "process": "process_running",
     }
     normalized = aliases.get(normalized, normalized)
     valid_conditions = {
@@ -188,11 +234,14 @@ def _validate_wait_for_args(
         "element_exists",
         "element_enabled",
         "focused_element",
+        "window_title",
+        "tcp_port_open",
+        "process_running",
     }
     if normalized not in valid_conditions:
         raise ValueError(
             "condition must be one of: text_exists, active_window, element_exists, "
-            "element_enabled, focused_element"
+            "element_enabled, focused_element, window_title, tcp_port_open, process_running"
         )
 
     if timeout <= 0 or timeout > 120:
@@ -207,6 +256,15 @@ def _validate_wait_for_args(
     if normalized in {"element_exists", "element_enabled"} and not (text or window_name):
         raise ValueError(
             "text or window_name is required when condition is element_exists or element_enabled"
+        )
+    if normalized == "window_title" and not (text or window_name):
+        raise ValueError("text or window_name is required when condition is window_title")
+    if normalized == "tcp_port_open":
+        if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
+            raise ValueError("port (1-65535) is required when condition is tcp_port_open")
+    if normalized == "process_running" and not (process_name or text):
+        raise ValueError(
+            "process_name (or text) is required when condition is process_running"
         )
 
     return normalized
@@ -441,10 +499,18 @@ def register(
     @mcp.tool(
         name="WaitFor",
         description=(
-            "Waits until a UI condition is satisfied, polling the Windows accessibility tree "
-            "inside the tool to avoid repeated Snapshot calls. Conditions: text_exists, "
-            "active_window, element_exists, element_enabled, focused_element. Provide text "
-            "and/or window_name depending on the condition. Set use_dom=True for browser DOM text."
+            "Waits server-side until a condition holds or the timeout expires — use it "
+            "instead of sleep-and-poll loops. UI conditions (polled against the Windows "
+            "accessibility tree): text_exists, active_window, element_exists, "
+            "element_enabled, focused_element, window_title (any top-level window whose "
+            "title matches text/window_name). System conditions (checked directly, no "
+            "desktop capture): tcp_port_open (needs port, host defaults to 127.0.0.1 — "
+            "the way to wait for a server to start listening) and process_running (needs "
+            "process_name or text). Set absent=True to wait for the condition to become "
+            "false instead (window closed, port freed, process exited, element gone). "
+            "Provide text and/or window_name depending on the condition. Set use_dom=True "
+            "for browser DOM text. Timeout raises a clear TimeoutError, never a silent "
+            "empty result."
         ),
         annotations=ToolAnnotations(
             title="WaitFor",
@@ -462,6 +528,10 @@ def register(
         timeout: float = 10.0,
         interval: float = 0.25,
         use_dom: bool | str = False,
+        port: int | None = None,
+        host: str = "127.0.0.1",
+        process_name: str | None = None,
+        absent: bool | str = False,
         ctx: Context = None,
     ) -> str:
         normalized = _validate_wait_for_args(
@@ -470,7 +540,10 @@ def register(
             window_name=window_name,
             timeout=timeout,
             interval=interval,
+            port=port,
+            process_name=process_name,
         )
+        absent_bool = _as_bool(absent, "absent")
         desktop = get_desktop()
         use_dom_bool = _as_bool(use_dom, "use_dom")
         started_at = time.monotonic()
@@ -480,28 +553,36 @@ def register(
 
         while True:
             attempts += 1
-            desktop_state = desktop.get_state(
-                use_vision=False,
-                use_dom=use_dom_bool,
-                use_ui_tree=True,
-                use_annotation=False,
-            )
-            matched, last_detail = _matches_wait_condition(
-                desktop_state=desktop_state,
-                condition=normalized,
-                text=text,
-                window_name=window_name,
-            )
+            if normalized == "tcp_port_open":
+                found, last_detail = _check_tcp_port(host, port)
+            elif normalized == "process_running":
+                found, last_detail = _check_process(process_name or text)
+            else:
+                desktop_state = desktop.get_state(
+                    use_vision=False,
+                    use_dom=use_dom_bool,
+                    use_ui_tree=True,
+                    use_annotation=False,
+                )
+                found, last_detail = _matches_wait_condition(
+                    desktop_state=desktop_state,
+                    condition=normalized,
+                    text=text,
+                    window_name=window_name,
+                )
+            matched = (not found) if absent_bool else found
             if matched:
                 elapsed = time.monotonic() - started_at
+                qualifier = " (absent)" if absent_bool else ""
                 return (
-                    f"WaitFor condition '{normalized}' satisfied after "
+                    f"WaitFor condition '{normalized}'{qualifier} satisfied after "
                     f"{elapsed:.2f}s and {attempts} attempt(s): {last_detail}."
                 )
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
-                    f"Timed out after {timeout:.2f}s waiting for '{normalized}': {last_detail}."
+                    f"Timed out after {timeout:.2f}s waiting for '{normalized}'"
+                    f"{' to become absent' if absent_bool else ''}: {last_detail}."
                 )
             time.sleep(min(interval, remaining))

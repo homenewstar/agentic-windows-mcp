@@ -1,7 +1,9 @@
 import logging
+import re
 import signal
 import subprocess
 from xml.sax.saxutils import escape as xml_escape
+from xml.sax.saxutils import unescape as xml_unescape
 
 import psutil
 
@@ -9,6 +11,7 @@ __all__ = [
     "run_with_graceful_timeout",
     "ps_quote",
     "ps_quote_for_xml",
+    "strip_clixml",
 ]
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,45 @@ def ps_quote_for_xml(value: str) -> str:
     """XML-escape then ps_quote. Use for values in XML passed to PowerShell."""
     escaped = xml_escape(value, {'"': '&quot;', "'": '&apos;'})
     return ps_quote(escaped)
+
+
+_CLIXML_OBJS_RE = re.compile(r"<Objs\b.*?</Objs>", re.DOTALL)
+_CLIXML_STRING_RE = re.compile(r"<S\b[^>]*>(.*?)</S>", re.DOTALL)
+_CLIXML_ESCAPE_RE = re.compile(r"_x([0-9A-Fa-f]{4})_")
+
+
+def _decode_clixml_string(raw: str) -> str:
+    """Decode one CLIXML <S> payload: XML entities + _xHHHH_ escapes."""
+    text = xml_unescape(raw)
+    return _CLIXML_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), text)
+
+
+def strip_clixml(text: str) -> str:
+    """Remove PowerShell CLIXML serialization noise from captured output.
+
+    When a nested PowerShell (or a progress/error stream in some hosting
+    modes) writes CLIXML, the raw text contains a ``#< CLIXML`` marker line
+    followed by an ``<Objs ...>`` document whose readable content is buried
+    in ``<S>`` string elements with ``_x000D__x000A_``-style escapes. Left in
+    place it pollutes results and breaks downstream string matching, so the
+    envelope is replaced by the plain strings it carried.
+
+    Text is only treated as CLIXML when it carries the ``#< CLIXML`` marker
+    or the PowerShell serialization namespace, so legitimate XML a command
+    prints on purpose is passed through untouched.
+    """
+    if not text:
+        return text
+    if "#< CLIXML" not in text and "schemas.microsoft.com/powershell" not in text:
+        return text
+
+    def _replace_objs(match: re.Match) -> str:
+        strings = [_decode_clixml_string(s) for s in _CLIXML_STRING_RE.findall(match.group(0))]
+        return "\n".join(s for s in strings if s)
+
+    cleaned = _CLIXML_OBJS_RE.sub(_replace_objs, text)
+    lines = [line for line in cleaned.splitlines() if line.strip() != "#< CLIXML"]
+    return "\n".join(lines).strip("\n")
 
 
 def check_pid_exists(pid: int) -> bool:

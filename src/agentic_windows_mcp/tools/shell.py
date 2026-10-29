@@ -21,7 +21,12 @@ def register(mcp, *, get_desktop, get_analytics):
     @with_analytics(get_analytics(), "Powershell-Tool")
     def powershell_tool(command: str, timeout: int = 30, ctx: Context = None) -> str:
         try:
-            response, status_code = PowerShellExecutor.execute_command(command, timeout)
-            return f"Response: {response}\nStatus Code: {status_code}"
+            stdout, stderr, status_code = PowerShellExecutor.execute_command_detailed(
+                command, timeout
+            )
+            result = f"Response: {stdout}\nStatus Code: {status_code}"
+            if stderr:
+                result += f"\nStderr: {stderr}"
+            return result
         except Exception as e:
             raise

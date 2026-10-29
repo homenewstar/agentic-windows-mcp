@@ -10,7 +10,7 @@ import shutil
 import subprocess
 
 from agentic_windows_mcp.desktop.utils import is_elevated
-from agentic_windows_mcp.powershell.utils import run_with_graceful_timeout
+from agentic_windows_mcp.powershell.utils import run_with_graceful_timeout, strip_clixml
 
 __all__ = ["PowerShellExecutor"]
 
@@ -204,24 +204,46 @@ def _resolve_shell(shell: str | None, env: dict[str, str]) -> str:
     return os.path.join(system_root, _WINDOWS_POWERSHELL)
 
 
+def wrap_command(command: str) -> str:
+    """Prefix a user command with the session settings every call needs.
+
+    - ``$OutputEncoding``: controls how PS5.1 encodes output written to its
+      stdout pipe. Without UTF-8, PS5.1 uses the system codepage and native
+      process stdout is silently lost when Python reads the pipe.
+    - ``[Console]::OutputEncoding``: controls how PS decodes bytes from
+      native exe stdout.
+    - ``$ProgressPreference``: progress records must never reach the result;
+      in some hosting modes they are serialized as CLIXML and pollute the
+      output (and any string matching done on it).
+    """
+    return (
+        "$OutputEncoding = [System.Text.Encoding]::UTF8; "
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+        "$ProgressPreference = 'SilentlyContinue'; "
+        f"{command}"
+    )
+
+
+def encode_command(command: str) -> str:
+    """Base64 (UTF-16LE) encode a command for ``-EncodedCommand``."""
+    return base64.b64encode(wrap_command(command).encode("utf-16le")).decode("ascii")
+
+
 class PowerShellExecutor:
     """Static utility class for executing PowerShell commands."""
 
     @staticmethod
-    def execute_command(
+    def execute_command_detailed(
             command: str, timeout: int = 10, shell: str | None = None
-    ) -> tuple[str, int]:
+    ) -> tuple[str, str, int]:
+        """Execute a command and return ``(stdout, stderr, status_code)``.
+
+        Both streams are decoded as UTF-8 and stripped of CLIXML noise, and
+        are returned separately so callers (the PowerShell tool) can present
+        them as distinct fields instead of one merged blob.
+        """
         try:
-            # $OutputEncoding: controls how PS5.1 encodes output written to its stdout pipe.
-            # Without this set to UTF-8, PS5.1 uses the system codepage and native process
-            # stdout is silently lost when Python reads the pipe.
-            # [Console]::OutputEncoding: controls how PS decodes bytes from native exe stdout.
-            utf8_command = (
-                "$OutputEncoding = [System.Text.Encoding]::UTF8; "
-                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
-                f"{command}"
-            )
-            encoded = base64.b64encode(utf8_command.encode("utf-16le")).decode("ascii")
+            encoded = encode_command(command)
             env = _prepare_env()
             # NO_COLOR suppresses ANSI escape sequences in pwsh 7.2+ (and many other CLI tools).
             # PS5.1 has no ANSI output, so this is harmlessly ignored there.
@@ -252,17 +274,32 @@ class PowerShellExecutor:
                 stdout = stdout.decode("utf-8", errors="replace")
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
-            output = stdout or stderr
-            # If the command failed with "Access is denied" and we aren't elevated, add a helpful hint
-            if result.returncode != 0 and "Access is denied" in output and not is_elevated():
-                output += (
-                    "\n\nHINT: This command may require an elevated (Administrator) terminal. "
-                    "The Agentic Agentic Windows MCP server is currently running at a lower integrity level."
-                )
-            return output, result.returncode
+            return strip_clixml(stdout), strip_clixml(stderr), result.returncode
         except subprocess.TimeoutExpired:
-            return "Command execution timed out", 1
+            return "Command execution timed out", "", 1
         except Exception as e:
             # WinError 2 does not say which file was missing, so name the shell.
             logger.warning("PowerShell command failed to run (shell=%s)", shell, exc_info=True)
-            return f"Command execution failed: {type(e).__name__}: {e} (shell: {shell})", 1
+            return f"Command execution failed: {type(e).__name__}: {e} (shell: {shell})", "", 1
+
+    @staticmethod
+    def execute_command(
+            command: str, timeout: int = 10, shell: str | None = None
+    ) -> tuple[str, int]:
+        """Execute a command and return ``(output, status_code)``.
+
+        Kept for the many internal callers that expect a single output
+        string: stdout wins, stderr is the fallback, matching the historical
+        behaviour.
+        """
+        stdout, stderr, status_code = PowerShellExecutor.execute_command_detailed(
+            command, timeout, shell
+        )
+        output = stdout or stderr
+        # If the command failed with "Access is denied" and we aren't elevated, add a helpful hint
+        if status_code != 0 and "Access is denied" in output and not is_elevated():
+            output += (
+                "\n\nHINT: This command may require an elevated (Administrator) terminal. "
+                "The Agentic Agentic Windows MCP server is currently running at a lower integrity level."
+            )
+        return output, status_code

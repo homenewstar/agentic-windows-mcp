@@ -308,6 +308,24 @@ def build_snapshot_response(
                     f"Wait For Change: no change within {frame['wait_timeout']}s - this frame is "
                     "identical to the previous capture.\n"
                 )
+    image_info = capture_result.get("image_info")
+    if image_info:
+        ow, oh = image_info["original_width"], image_info["original_height"]
+        w, h = image_info["width"], image_info["height"]
+        if (w, h) != (ow, oh) and w:
+            ratio = round(ow / w, 4)
+            metadata_text += (
+                f"Image Processing: resized {ow}x{oh} -> {w}x{h}; multiply coordinates "
+                f"read from this image by {ratio} to map them onto the captured frame.\n"
+            )
+        metadata_text += (
+            f"Image Format: {image_info['format']}, {image_info['byte_size']} bytes\n"
+        )
+        if image_info.get("saved_path"):
+            metadata_text += (
+                f"Saved Screenshot: {image_info['saved_path']} ({w}x{h}, "
+                f"{image_info['byte_size']} bytes) - image not returned inline.\n"
+            )
     refs_generation = capture_result.get("refs_generation")
     if refs_generation is not None:
         metadata_text += (
@@ -368,5 +386,6 @@ def build_snapshot_response(
 
     response = [response_text]
     if screenshot_bytes:
-        response.append(Image(data=screenshot_bytes, format="png"))
+        image_format = (capture_result.get("image_info") or {}).get("format", "png")
+        response.append(Image(data=screenshot_bytes, format=image_format))
     return response

@@ -40,7 +40,14 @@ class TestStripClixml:
 
 
 def _mangle(text: str) -> str:
-    """Reproduce the damage: UTF-8 bytes decoded with the cp1252 fallback."""
+    """Reproduce the damage: UTF-8 bytes decoded with the cp1252 fallback.
+
+    Sample strings must avoid characters whose UTF-8 bytes land on
+    cp1252-undefined positions (0x81, 0x8D, 0x8F, 0x90, 0x9D — e.g. the
+    closing smart quote U+201D): Python's strict cp1252 decoder rejects
+    those bytes outright, while the real Windows decoder substitutes a
+    replacement character (unrecoverable either way).
+    """
     return text.encode("utf-8").decode("cp1252")
 
 
@@ -53,7 +60,7 @@ class TestRepairDoubleEncodedText:
     def test_repairs_generated_mojibake(self):
         for original in (
             "Tiếng Việt có dấu",
-            "Xin chào, đây là kiểm tra — dấu “ngoặc kép” và emoji-free",
+            "Xin chào, đây là kiểm tra — dấu ‘ngoặc đơn’ và gạch ngang",
             "Réunion des écoles",
         ):
             assert repair_double_encoded_text(_mangle(original)) == original
@@ -70,9 +77,9 @@ class TestRepairDoubleEncodedText:
 
     def test_repairs_per_line_and_leaves_good_lines_alone(self):
         good = "Dòng này đúng sẵn ✓"  # ✓ cannot re-encode as cp1252 either
-        text = _mangle("Dòng bị hỏng") + "\n" + good + "\n" + "ascii line"
+        text = _mangle("Dòng này bị sai") + "\n" + good + "\n" + "ascii line"
         fixed = repair_double_encoded_text(text)
-        assert fixed.split("\n") == ["Dòng bị hỏng", good, "ascii line"]
+        assert fixed.split("\n") == ["Dòng này bị sai", good, "ascii line"]
 
     def test_line_with_unencodable_characters_is_left_alone(self):
         # An emoji on the same line makes the cp1252 re-encode fail, so the

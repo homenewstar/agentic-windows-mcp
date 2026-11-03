@@ -209,5 +209,6 @@ def test_type_tool_passes_parsed_booleans_through() -> None:
             "caret_position": "idle",
             "clear": True,
             "press_enter": False,
+            "verify": False,
         }
     ]

@@ -65,6 +65,32 @@ class TestRepairDoubleEncodedText:
         ):
             assert repair_double_encoded_text(_mangle(original)) == original
 
+    def test_repairs_latin1_style_mojibake(self):
+        # The shape PowerShell 5.1 actually produces: UTF-8 bytes mapped
+        # byte->codepoint (Latin-1), leaving C1 controls in the string.
+        for original in (
+            "Cuộc trò chuyện mới",
+            "Tôi đang kiểm tra các sự kiện trên Google Lịch",
+            "Tiếng Việt có dấu",
+        ):
+            mangled = original.encode("utf-8").decode("latin-1")
+            assert repair_double_encoded_text(mangled) == original
+
+    def test_repairs_the_exact_string_captured_live(self):
+        # Codepoints read off desktop-ddpatmg on 2026-11-03 from an
+        # Invoke-RestMethod result: byte 0x99/0x87/0x9B became the C1
+        # controls U+0099/U+0087/U+009B, so the string cannot re-encode
+        # under cp1252 at all — only the latin-1 candidate can undo it.
+        mangled = "".join(
+            chr(c)
+            for c in (
+                0x43, 0x75, 0xE1, 0xBB, 0x99, 0x63, 0x20, 0x74, 0x72, 0xC3,
+                0xB2, 0x20, 0x63, 0x68, 0x75, 0x79, 0xE1, 0xBB, 0x87, 0x6E,
+                0x20, 0x6D, 0xE1, 0xBB, 0x9B, 0x69,
+            )
+        )
+        assert repair_double_encoded_text(mangled) == "Cuộc trò chuyện mới"
+
     def test_correct_text_is_untouched(self):
         for text in (
             "Cuộc trò chuyện mới",

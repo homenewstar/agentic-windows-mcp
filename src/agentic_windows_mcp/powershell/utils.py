@@ -77,7 +77,7 @@ _MOJIBAKE_MARKERS = ("Ã", "Â", "á»", "â€")
 # Codepages a Windows component may wrongly decode UTF-8 with, in order of
 # likelihood: 1252 is Windows PowerShell 5.1's fallback for HTTP bodies
 # without a charset; 1258 is the ANSI codepage on Vietnamese systems.
-_REPAIR_ENCODINGS = ("cp1252", "cp1258")
+_REPAIR_ENCODINGS = ("cp1252", "cp1258", "latin-1")
 
 
 def _repair_double_encoded_line(line: str) -> str:
@@ -117,6 +117,16 @@ def repair_double_encoded_text(text: str) -> str:
     shell, before anything reaches the pipe. The same mangling occurs
     when a native program's UTF-8 stdout is decoded by a console host
     running a legacy codepage.
+
+    The fallback PS 5.1 actually applies is byte->codepoint identity
+    (Latin-1), not printable cp1252: the string captured live holds the
+    C1 control characters U+0099, U+0087 and U+009B where the original
+    UTF-8 bytes were 0x99, 0x87 and 0x9B. Tool displays render those
+    controls invisibly, which makes the damage LOOK like cp1252 mojibake
+    — the codepoints are the ground truth. latin-1 is therefore in the
+    candidate list alongside the real codepages; the marker and
+    strict-UTF-8 gates in ``_repair_double_encoded_line`` keep every
+    candidate honest.
 
     The repair is applied per line and is deliberately conservative —
     see ``_repair_double_encoded_line`` — so output that is already

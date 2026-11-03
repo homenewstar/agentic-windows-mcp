@@ -10,7 +10,11 @@ import shutil
 import subprocess
 
 from agentic_windows_mcp.desktop.utils import is_elevated
-from agentic_windows_mcp.powershell.utils import run_with_graceful_timeout, strip_clixml
+from agentic_windows_mcp.powershell.utils import (
+    repair_double_encoded_text,
+    run_with_graceful_timeout,
+    strip_clixml,
+)
 
 __all__ = ["PowerShellExecutor"]
 
@@ -265,8 +269,9 @@ class PowerShellExecutor:
     ) -> tuple[str, str, int]:
         """Execute a command and return ``(stdout, stderr, status_code)``.
 
-        Both streams are decoded as UTF-8 and stripped of CLIXML noise, and
-        are returned separately so callers (the PowerShell tool) can present
+        Both streams are decoded as UTF-8, stripped of CLIXML noise and
+        repaired when the child shell double-encoded them (#11), and are
+        returned separately so callers (the PowerShell tool) can present
         them as distinct fields instead of one merged blob.
         """
         try:
@@ -288,7 +293,14 @@ class PowerShellExecutor:
                 stdout = stdout.decode("utf-8", errors="replace")
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
-            return strip_clixml(stdout), strip_clixml(stderr), result.returncode
+            # The child shell itself can hand back double-encoded text
+            # (e.g. PS 5.1 decoding a charset-less JSON body as cp1252 —
+            # issue #11); undo that damage after CLIXML cleanup.
+            return (
+                repair_double_encoded_text(strip_clixml(stdout)),
+                repair_double_encoded_text(strip_clixml(stderr)),
+                result.returncode,
+            )
         except subprocess.TimeoutExpired:
             return "Command execution timed out", "", 1
         except Exception as e:

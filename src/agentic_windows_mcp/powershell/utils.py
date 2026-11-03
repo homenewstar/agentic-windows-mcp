@@ -12,6 +12,7 @@ __all__ = [
     "ps_quote",
     "ps_quote_for_xml",
     "strip_clixml",
+    "repair_double_encoded_text",
 ]
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,65 @@ def strip_clixml(text: str) -> str:
     cleaned = _CLIXML_OBJS_RE.sub(_replace_objs, text)
     lines = [line for line in cleaned.splitlines() if line.strip() != "#< CLIXML"]
     return "\n".join(lines).strip("\n")
+
+
+# Byte sequences that UTF-8 text acquires when it is decoded once with a
+# legacy Windows codepage: "Ã" is lead byte 0xC3, "Â" is 0xC2, "á»" is the
+# pair 0xE1 0xBB, "â€" starts the 0xE2 0x80 smart-quote/dash family. Real
+# text in any language rarely contains them; mojibake always does.
+_MOJIBAKE_MARKERS = ("Ã", "Â", "á»", "â€")
+
+# Codepages a Windows component may wrongly decode UTF-8 with, in order of
+# likelihood: 1252 is Windows PowerShell 5.1's fallback for HTTP bodies
+# without a charset; 1258 is the ANSI codepage on Vietnamese systems.
+_REPAIR_ENCODINGS = ("cp1252", "cp1258")
+
+
+def _repair_double_encoded_line(line: str) -> str:
+    """Undo one round of UTF-8-decoded-as-codepage damage on a single line.
+
+    The line is only rewritten when it carries a mojibake marker AND the
+    full line re-encodes under a candidate codepage AND those bytes decode
+    as strict UTF-8 AND the result is marker-free. Anything else — correct
+    text, text with characters the codepage cannot represent (emoji, real
+    replacement chars), partial damage — is returned untouched, so correct
+    output can never be corrupted by the repair.
+    """
+    if not any(marker in line for marker in _MOJIBAKE_MARKERS):
+        return line
+    for encoding in _REPAIR_ENCODINGS:
+        try:
+            raw = line.encode(encoding)
+        except (UnicodeEncodeError, LookupError):
+            continue
+        try:
+            fixed = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if fixed != line and not any(marker in fixed for marker in _MOJIBAKE_MARKERS):
+            return fixed
+    return line
+
+
+def repair_double_encoded_text(text: str) -> str:
+    """Repair text that was UTF-8 but got decoded with a legacy codepage.
+
+    Windows PowerShell 5.1 decodes an HTTP response body that carries no
+    charset (the common case for JSON APIs) with its legacy fallback
+    instead of UTF-8, so a command like ``Invoke-RestMethod`` hands the
+    caller an already-mangled string: the executor's own UTF-8 output
+    settings (#5) cannot help because the damage happens inside the child
+    shell, before anything reaches the pipe. The same mangling occurs
+    when a native program's UTF-8 stdout is decoded by a console host
+    running a legacy codepage.
+
+    The repair is applied per line and is deliberately conservative —
+    see ``_repair_double_encoded_line`` — so output that is already
+    correct passes through byte-for-byte unchanged.
+    """
+    if not text or not any(marker in text for marker in _MOJIBAKE_MARKERS):
+        return text
+    return "\n".join(_repair_double_encoded_line(line) for line in text.split("\n"))
 
 
 def check_pid_exists(pid: int) -> bool:

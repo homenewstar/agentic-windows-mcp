@@ -1,11 +1,14 @@
 """Issue #5 — PowerShell output hygiene: UTF-8 round-trip, no CLIXML noise,
-stdout/stderr returned as separate fields."""
+stdout/stderr returned as separate fields.
+
+Issue #11 — text the child shell double-encoded (UTF-8 decoded as cp1252,
+e.g. PS 5.1 Invoke-RestMethod on a charset-less JSON body) is repaired."""
 
 import sys
 
 import pytest
 
-from agentic_windows_mcp.powershell.utils import strip_clixml
+from agentic_windows_mcp.powershell.utils import repair_double_encoded_text, strip_clixml
 
 CLIXML_SAMPLE = (
     "#< CLIXML\n"
@@ -34,6 +37,48 @@ class TestStripClixml:
 
     def test_empty_and_none_like(self):
         assert strip_clixml("") == ""
+
+
+def _mangle(text: str) -> str:
+    """Reproduce the damage: UTF-8 bytes decoded with the cp1252 fallback."""
+    return text.encode("utf-8").decode("cp1252")
+
+
+class TestRepairDoubleEncodedText:
+    def test_repairs_the_exact_string_observed_in_issue_11(self):
+        # Captured live from a PS 5.1 Invoke-RestMethod call against a
+        # charset-less JSON API on 2026-11-03.
+        assert repair_double_encoded_text("Cuá»™c trÃ² chuyá»‡n má»›i") == "Cuộc trò chuyện mới"
+
+    def test_repairs_generated_mojibake(self):
+        for original in (
+            "Tiếng Việt có dấu",
+            "Xin chào, đây là kiểm tra — dấu “ngoặc kép” và emoji-free",
+            "Réunion des écoles",
+        ):
+            assert repair_double_encoded_text(_mangle(original)) == original
+
+    def test_correct_text_is_untouched(self):
+        for text in (
+            "Cuộc trò chuyện mới",
+            "Tiếng Việt có dấu\nsecond line",
+            "plain ascii output",
+            "café © 2026 — Réunion",
+            "",
+        ):
+            assert repair_double_encoded_text(text) == text
+
+    def test_repairs_per_line_and_leaves_good_lines_alone(self):
+        good = "Dòng này đúng sẵn ✓"  # ✓ cannot re-encode as cp1252 either
+        text = _mangle("Dòng bị hỏng") + "\n" + good + "\n" + "ascii line"
+        fixed = repair_double_encoded_text(text)
+        assert fixed.split("\n") == ["Dòng bị hỏng", good, "ascii line"]
+
+    def test_line_with_unencodable_characters_is_left_alone(self):
+        # An emoji on the same line makes the cp1252 re-encode fail, so the
+        # line is returned as-is rather than partially rewritten.
+        line = _mangle("Xin chào") + " 🎉"
+        assert repair_double_encoded_text(line) == line
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="needs a real Windows PowerShell")

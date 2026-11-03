@@ -130,6 +130,64 @@ def _escape_text_for_sendkeys(text: str) -> str:
     return "".join(result)
 
 
+def _normalize_field_text(value: str) -> str:
+    """Normalize a field value for comparison: CRLF/CR become LF."""
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _assess_typed_text(
+    baseline: str | None,
+    text: str,
+    actual: str | None,
+    *,
+    clear: bool,
+    caret_position: str,
+) -> tuple[str, str]:
+    """Judge whether typed text landed, for Type's verify option (#10).
+
+    Returns ``(status, detail)`` where status is ``verified``,
+    ``mismatch`` or ``unavailable``. ``baseline`` is the field's value
+    read before typing (None when unreadable), ``actual`` its value
+    after typing. The comparison is exact when the expected content is
+    fully determined (clear, or a known baseline); with an unreadable
+    baseline on an append it degrades to a containment check, which
+    still catches the classic dropped-characters failure.
+    """
+    if actual is None:
+        return (
+            "unavailable",
+            "the focused element does not expose a readable value, "
+            "so the typed text could not be checked",
+        )
+    actual_norm = _normalize_field_text(actual)
+    text_norm = _normalize_field_text(text)
+    expected: str | None = None
+    if clear:
+        expected = text_norm
+    elif baseline is not None and caret_position in ("start", "end"):
+        baseline_norm = _normalize_field_text(baseline)
+        expected = text_norm + baseline_norm if caret_position == "start" else baseline_norm + text_norm
+    # caret_position == "idle" leaves the insertion point wherever the
+    # click landed, so the expected content is not fully determined and
+    # the containment check below applies even with a known baseline.
+    if expected is not None:
+        if actual_norm == expected:
+            return "verified", "the field's content matches the typed text"
+        return (
+            "mismatch",
+            f"expected the field to contain {expected[:80]!r} "
+            f"but it contains {actual_norm[:80]!r}",
+        )
+    if text_norm and text_norm in actual_norm:
+        return "verified", "the typed text is present in the field's content"
+    if not text_norm:
+        return "verified", "nothing to check (empty text)"
+    return (
+        "mismatch",
+        f"the typed text was not found in the field's content {actual_norm[:80]!r}",
+    )
+
+
 class StaleRefError(RuntimeError):
     """An element ref (@e/@s) no longer resolves to its snapshot element."""
 
@@ -1013,6 +1071,14 @@ class Desktop:
     # so escape sequences ({Enter}, {Tab}, …) still work.
     _LONG_TEXT_PASTE_THRESHOLD = 20
 
+    # The SendKeys path types in chunks with a short pause between them.
+    # A flat-out keystroke stream overflows slower targets' input queues
+    # and silently drops characters — observed on multi-hundred-character
+    # code snippets full of braces/newlines (which cannot take the paste
+    # path) typed into a browser DevTools console (#10).
+    _TYPE_CHUNK_SIZE = 48
+    _TYPE_CHUNK_PAUSE = 0.08
+
     def type(
         self,
         loc: tuple[int, int],
@@ -1020,9 +1086,11 @@ class Desktop:
         caret_position: Literal["start", "idle", "end"] = "idle",
         clear: bool | str = False,
         press_enter: bool | str = False,
+        verify: bool | str = False,
     ):
         clear = as_bool(clear, "clear")
         press_enter = as_bool(press_enter, "press_enter")
+        verify = as_bool(verify, "verify")
         owner = get_controller()
         owner.checkpoint_current()
         x, y = loc
@@ -1037,6 +1105,7 @@ class Desktop:
             owner.checkpoint_current()
             uia.SendKeys("{End}", waitTime=0.05)
             owner.record_step_current()
+        baseline = self._read_focused_text() if verify else None
         if clear:
             sleep(0.5)
             owner.checkpoint_current()
@@ -1053,14 +1122,26 @@ class Desktop:
         else:
             # Bump interval from 0.02 → 0.04. Keeps short-text speed acceptable
             # while reducing key-loss; each character is a cancellation point.
-            for ch in text:
+            for index, ch in enumerate(text):
                 owner.checkpoint_current()
                 uia.SendKeys(_escape_text_for_sendkeys(ch), interval=0.04, waitTime=0.05)
                 owner.record_step_current()
+                if (index + 1) % self._TYPE_CHUNK_SIZE == 0 and index + 1 < len(text):
+                    sleep(self._TYPE_CHUNK_PAUSE)
+        verification = None
+        if verify:
+            verification = _assess_typed_text(
+                baseline,
+                text,
+                self._read_focused_text(),
+                clear=clear,
+                caret_position=caret_position,
+            )
         if press_enter:
             owner.checkpoint_current()
             uia.SendKeys("{Enter}", waitTime=0.05)
             owner.record_step_current()
+        return verification
 
     def _paste_text(self, text: str):
         """Stash text on the clipboard, Ctrl+V, restore prior clipboard.
@@ -1089,6 +1170,34 @@ class Desktop:
                         uia.SetClipboardText(prior)
                 except Exception:
                     pass
+
+    def _read_focused_text(self) -> str | None:
+        """Best-effort read of the focused element's text value.
+
+        Used only by Type verification (#10). Any failure — no focused
+        element, neither ValuePattern nor TextPattern supported, a UIA
+        error — returns None, which the assessment reports as
+        "unavailable" instead of failing the type action itself.
+        """
+        try:
+            control = uia.GetFocusedControl()
+            if control is None:
+                return None
+            try:
+                value_pattern = control.GetValuePattern()
+                if value_pattern is not None:
+                    return value_pattern.Value
+            except Exception:
+                pass
+            try:
+                text_pattern = control.GetTextPattern()
+                if text_pattern is not None:
+                    return text_pattern.DocumentRange.GetText(-1)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return None
 
     def scroll(
         self,

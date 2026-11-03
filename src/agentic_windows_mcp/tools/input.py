@@ -315,7 +315,7 @@ def register(
 
     @mcp.tool(
         name="Type",
-        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear_first=True (alias: clear=True) to select-all and delete the field's existing content before typing — use it whenever the field may already hold text, e.g. a browser address bar; False appends. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear_first/clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear_first=True to just empty a field.",
+        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear_first=True (alias: clear=True) to select-all and delete the field's existing content before typing — use it whenever the field may already hold text, e.g. a browser address bar; False appends. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear_first/clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear_first=True to just empty a field. Long text is typed in paced chunks so loaded targets do not silently drop characters; set verify=True to read the field's value back afterwards and report whether the text landed intact (verified), differs (mismatch), or cannot be read (unavailable) — use it for long or critical input such as code pasted into a console.",
         annotations=ToolAnnotations(
             title="Type",
             readOnlyHint=False,
@@ -333,6 +333,7 @@ def register(
         clear_first: bool | str | None = None,
         caret_position: Literal["start", "idle", "end"] = "idle",
         press_enter: bool | str = False,
+        verify: bool | str = False,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -341,6 +342,7 @@ def register(
         if clear_first is not None:
             clear = clear or _as_bool(clear_first, "clear_first")
         press_enter = _as_bool(press_enter, "press_enter")
+        verify = _as_bool(verify, "verify")
         if loc is None and label is None:
             raise ValueError("Either loc or label must be provided.")
         if label is not None:
@@ -348,14 +350,27 @@ def register(
         if len(loc) != 2:
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]
-        desktop.type(
+        verification = desktop.type(
             loc=loc,
             text=text,
             caret_position=caret_position,
             clear=clear,
             press_enter=press_enter,
+            verify=verify,
         )
-        return f"Typed {text} at ({x},{y})."
+        message = f"Typed {text} at ({x},{y})."
+        if verify:
+            if verification is None:
+                message += " Verification unavailable: the desktop returned no result."
+            else:
+                status, detail = verification
+                if status == "verified":
+                    message += f" Verification: passed — {detail}."
+                elif status == "mismatch":
+                    message += f" Verification FAILED: {detail}."
+                else:
+                    message += f" Verification unavailable: {detail}."
+        return message
 
     @mcp.tool(
         name="Scroll",

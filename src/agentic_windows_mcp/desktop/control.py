@@ -250,7 +250,7 @@ class ControlCoordinator:
             # held — an emergency fault latch, and any AI input holds the
             # ledger could not release (their names only, never content).
             "emergency": bool(self._emergency),
-            "pending_holds": list(self.input_ledger.pending()),
+            "pending_holds": list(self.input_ledger.pending_cached()),
         }
 
     def set_recovery_handler(self, handler: Callable[[], str] | None) -> None:

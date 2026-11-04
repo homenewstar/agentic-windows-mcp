@@ -125,6 +125,8 @@ def test_disabled_start_status_and_cleanup(monkeypatch):
             "wedged": False,
             "recovery_enabled": False,
             "recovery_events": [],
+            "emergency": False,
+            "pending_holds": ["key"],
         },
     }
     assert owner.input_ledger.pending() == ("key",)

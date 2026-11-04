@@ -17,6 +17,7 @@ class InputLedger:
         self._lock = threading.RLock()
         self._holds: dict[str, tuple[Callable[[], None], Callable[[], bool]]] = {}
         self._blocked = False
+        self._pending_cache: tuple[str, ...] = ()
 
     def block_new(self) -> None:
         self._blocked = True
@@ -41,6 +42,7 @@ class InputLedger:
             if name in self._holds:
                 raise RuntimeError(f"AI input already held: {name}")
             self._holds[name] = (send_up, physical_down_delivered)
+            self._pending_cache = tuple(self._holds)
             try:
                 # Keep the lock through injection so a watchdog cannot send
                 # up before the matching down has actually reached Windows.
@@ -63,6 +65,7 @@ class InputLedger:
             if not physical_down_delivered():
                 send_up()
             self._holds.pop(name, None)
+            self._pending_cache = tuple(self._holds)
 
     def release_all(self) -> None:
         with self._lock:
@@ -80,3 +83,14 @@ class InputLedger:
     def pending(self) -> tuple[str, ...]:
         with self._lock:
             return tuple(self._holds)
+
+    def pending_cached(self) -> tuple[str, ...]:
+        """Last-known hold names, read without taking the ledger lock.
+
+        Status/health snapshots are built on worker and hook paths where
+        the ledger lock may be held by a cleanup in progress; blocking on
+        it there would stall the very cleanup being reported on. The
+        cache is refreshed under the lock on every press and release, so
+        it is current as of the last completed mutation.
+        """
+        return self._pending_cache

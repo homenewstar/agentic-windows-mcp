@@ -31,6 +31,13 @@ from agentic_windows_mcp.desktop.control_win32 import (
 logger = logging.getLogger(__name__)
 
 
+# Grace period before a latched "unavailable" state becomes a recovery
+# trigger of its own: the control worker loop's rehook recovery gets this
+# long to clear the latch first, and the 120s recovery cooldown still
+# bounds how often the handler itself may run.
+_UNAVAILABLE_LATCH_GRACE_SECONDS = 60.0
+
+
 class ControlBlocked(RuntimeError):
     def __init__(self, code: str, status: dict):
         self.code = code
@@ -83,6 +90,11 @@ class ControlCoordinator:
         self._recovery_events: list[dict] = []
         self._last_recovery_at = 0.0
         self._recovery_lock = threading.Lock()
+        # When the coordinator entered "unavailable" (monotonic), or None
+        # while it is in any other state. A latched unavailable that the
+        # worker loop's rehook recovery could not clear becomes a recovery
+        # trigger of its own after a grace period (see _maybe_recover).
+        self._unavailable_since: float | None = None
         self._suppress = False  # Atomic snapshot read by the hook callbacks.
         self._deadline = 0.0
         self._emergency = False
@@ -234,6 +246,11 @@ class ControlCoordinator:
             "wedged": wedged,
             "recovery_enabled": bool(self.health_recovery and self._recovery_handler),
             "recovery_events": list(self._recovery_events[-5:]),
+            # Latch diagnostics: why a non-wedged "unavailable" is being
+            # held — an emergency fault latch, and any AI input holds the
+            # ledger could not release (their names only, never content).
+            "emergency": bool(self._emergency),
+            "pending_holds": list(self.input_ledger.pending()),
         }
 
     def set_recovery_handler(self, handler: Callable[[], str] | None) -> None:
@@ -247,21 +264,50 @@ class ControlCoordinator:
 
     def _maybe_recover(self, result: dict) -> bool:
         health = result.get("health") or {}
-        if not (self.health_recovery and self._recovery_handler and health.get("wedged")):
+        # Two triggers share the same scoped handler (a restart of the
+        # input monitor/watchdog threads via stop()+start()):
+        #  - "wedged": the conservative health verdict (dead watchdog,
+        #    stale heartbeat, or a call in flight far too long).
+        #  - "unavailable_latch": the coordinator has sat in "unavailable"
+        #    past the grace period without the worker loop's rehook
+        #    recovery clearing it. The latch alone never reads as wedged
+        #    (watchdog alive, heartbeat fresh, no call in flight), so
+        #    without this trigger a transient fault that latches the
+        #    state — e.g. a failed hold release after an otherwise
+        #    successful call — would lock the channel until the whole
+        #    server process is restarted by hand.
+        latched = (
+            result.get("state") == "unavailable"
+            and self._unavailable_since is not None
+            and time.monotonic() - self._unavailable_since
+            >= _UNAVAILABLE_LATCH_GRACE_SECONDS
+            and not self._stop.is_set()
+        )
+        if not (
+            self.health_recovery
+            and self._recovery_handler
+            and (health.get("wedged") or latched)
+        ):
             return False
         if time.monotonic() - self._last_recovery_at < 120.0:
             return False
         if not self._recovery_lock.acquire(blocking=False):
             return False
+        trigger = "wedged" if health.get("wedged") else "unavailable_latch"
         try:
             self._last_recovery_at = time.monotonic()
             try:
                 outcome = self._recovery_handler()
-                event = {"action": "wedged_channel_recovery", "outcome": str(outcome)}
+                event = {
+                    "action": "wedged_channel_recovery",
+                    "outcome": str(outcome),
+                    "trigger": trigger,
+                }
             except Exception as e:  # Recovery must never take status down.
                 event = {
                     "action": "wedged_channel_recovery",
                     "outcome": f"error: {type(e).__name__}: {e}",
+                    "trigger": trigger,
                 }
             event["at_monotonic"] = round(self._last_recovery_at, 1)
             with self._lock:
@@ -337,6 +383,10 @@ class ControlCoordinator:
         if state == self._state:
             return False
         self._state = state
+        if state == "unavailable":
+            self._unavailable_since = time.monotonic()
+        else:
+            self._unavailable_since = None
         if state != "ai":
             self.input_ledger.block_new()
         self._generation += 1

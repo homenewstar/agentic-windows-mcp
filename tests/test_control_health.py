@@ -106,3 +106,82 @@ class TestRecovery:
         events = result["health"]["recovery_events"]
         assert len(events) == 1
         assert "error" in events[0]["outcome"]
+
+
+class TestLatchedUnavailableRecovery:
+    """A transient fault can latch the coordinator in "unavailable" while
+    every wedged signal stays green (watchdog alive, heartbeat fresh, no
+    call in flight). The latch must still reach the recovery handler once
+    it outlives the grace period, or only a manual server-process restart
+    can free the channel."""
+
+    def _latched(self, owner, *, age=120.0):
+        with owner._lock:
+            owner._set_locked("unavailable")
+        owner._unavailable_since = time.monotonic() - age
+
+    def test_latch_is_not_wedged_but_still_recovers(self):
+        owner = ready_controller()
+        owner.health_recovery = True
+        calls = []
+        owner.set_recovery_handler(lambda: calls.append(1) or "restarted")
+        self._latched(owner)
+        result = owner.status()
+        assert result["health"]["wedged"] is False
+        assert calls == [1]
+        events = result["health"]["recovery_events"]
+        assert len(events) == 1
+        assert events[0]["trigger"] == "unavailable_latch"
+        assert events[0]["outcome"] == "restarted"
+
+    def test_latch_within_grace_period_does_not_recover(self):
+        owner = ready_controller()
+        owner.health_recovery = True
+        calls = []
+        owner.set_recovery_handler(lambda: calls.append(1) or "restarted")
+        self._latched(owner, age=5.0)
+        owner.status()
+        assert calls == []
+
+    def test_latch_recovery_respects_cooldown(self):
+        owner = ready_controller()
+        owner.health_recovery = True
+        calls = []
+        owner.set_recovery_handler(lambda: calls.append(1) or "restarted")
+        self._latched(owner)
+        owner.status()
+        assert calls == [1]
+        # Still latched with an old timestamp: the 120s cooldown, not the
+        # grace period, is what bounds the retry rate.
+        owner.status()
+        assert calls == [1]
+
+    def test_latch_does_not_recover_when_stopped(self):
+        owner = ready_controller()
+        owner.health_recovery = True
+        calls = []
+        owner.set_recovery_handler(lambda: calls.append(1) or "restarted")
+        self._latched(owner)
+        owner._stop.set()
+        owner.status()
+        assert calls == []
+
+    def test_latch_does_not_recover_when_recovery_disabled(self):
+        owner = ready_controller()
+        calls = []
+        owner.set_recovery_handler(lambda: calls.append(1) or "restarted")
+        self._latched(owner)
+        owner.status()
+        assert calls == []
+
+    def test_health_reports_emergency_and_pending_holds(self):
+        owner = ready_controller()
+        owner.input_ledger.enable()  # As begin_call does before any press.
+        owner.input_ledger.press("key_a", lambda: None, lambda: None, lambda: False)
+        try:
+            health = owner.status()["health"]
+            assert health["pending_holds"] == ["key_a"]
+            assert health["emergency"] is False
+        finally:
+            owner.input_ledger.release_all()
+        assert owner.status()["health"]["pending_holds"] == []

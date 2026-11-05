@@ -150,7 +150,8 @@ class FakeDesktop:
 
     def type(self, **kwargs: object):
         self.type_calls.append(kwargs)
-        return self.verification
+        # Desktop.type returns (verification, secure_target) since #15.
+        return self.verification, False
 
 
 def _tools(desktop: FakeDesktop) -> dict[str, Callable]:

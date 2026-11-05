@@ -304,14 +304,14 @@ DeepSeek (and other models) connect in two ways:
 
 ---
 
-## 🧰 The toolset (50 tools)
+## 🧰 The toolset (51 tools)
 
 | Group | Tools |
 |---|---|
 | **Desktop control** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
 | **Element refs & queries** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is`, `Batch` |
 | **Apps & system** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
-| **Control gate** | `ControlStatus` (who currently holds control, which policy applies) |
+| **Control gate** | `ControlStatus` (who currently holds control, which policy applies), `Guide` (the bundled, version-matched agent playbook: `core` / `windows` / `operations`) |
 | **Browser (CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **Deep DevTools** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
 

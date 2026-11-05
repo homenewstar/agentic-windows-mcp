@@ -172,6 +172,14 @@
       "description": "Evaluate one predicate (enabled, visible, focused, checked, expanded, selected, editable, password) on a Snapshot ref element from the live element, returning true, false, or unknown when the live read cannot decide."
     },
     {
+      "name": "Guide",
+      "description": "Fetch the server's own agent playbook for a topic ('core', 'windows', or 'operations'): version-matched guidance on the observe-act-verify loop, ref and retry discipline, Windows platform pitfalls, and control-gate/health operations. Fetch 'core' before your first action in a session."
+    },
+    {
+      "name": "Session",
+      "description": "Manage snapshot sessions: named namespaces that own Snapshot refs. mode='start' with a session_id scopes registrations and ref resolution to that session (refs from other sessions never resolve in it); mode='status' reports the active session and all sessions' generations; mode='end' returns to the default session, keeping the ended session's refs for a later resume."
+    },
+    {
       "name": "Batch",
       "description": "Run an ordered sequence of actions (Click, Type, Invoke, SetValue, Toggle, Shortcut, Scroll, Move, Wait) in one call under a single control-gate lease, with per-step results; stops at the first failure unless continue_on_error is set."
     },

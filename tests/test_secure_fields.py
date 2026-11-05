@@ -86,7 +86,7 @@ class TestWriteSide:
                 return decorator
 
         class FakeDesktop:
-            def set_element_value(self, label, value, snapshot):
+            def set_element_value(self, label, value, snapshot, wait_timeout=3.0):
                 return ElementRef(
                     label=label, runtime_id=(1,), window_handle=1,
                     name="Password", control_type="Edit", is_password=True,

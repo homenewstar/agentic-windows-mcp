@@ -193,6 +193,11 @@ class StaleRefError(RuntimeError):
     """An element ref (@e/@s) no longer resolves to its snapshot element."""
 
 
+class AmbiguousRefError(RuntimeError):
+    """An element ref matches several live elements, or was never unique
+    (issue #12) — resolving it would mean guessing, so it is refused."""
+
+
 @dataclass
 class ElementRef:
     """Identity of one snapshot element, captured for later re-acquisition."""
@@ -206,6 +211,17 @@ class ElementRef:
     # time. Carried on the ref so write tools can refuse to echo values; the
     # ref identity itself never contains the field's content.
     is_password: bool = False
+    # Strict-resolution evidence (#12): the element's AutomationId and help
+    # text at capture; whether its identity predicate (window, control type,
+    # AutomationId, name) was unique in the window at capture; and the
+    # window owner's identity (pid + process creation-time token) so a
+    # recycled HWND fails closed instead of resolving into another window.
+    # Control values and bounds are never part of the identity.
+    automation_id: str = ""
+    description: str = ""
+    window_pid: int = 0
+    window_process_token: float | None = None
+    unique_at_capture: bool = True
 
 
 def find_control_by_runtime_id(root, runtime_id: tuple, max_nodes: int = 20000):
@@ -231,6 +247,77 @@ def find_control_by_runtime_id(root, runtime_id: tuple, max_nodes: int = 20000):
         except Exception:
             continue
     return None
+
+
+def _window_identity(window_handle: int) -> tuple[int, float | None]:
+    """(pid, process creation-time token) owning a window handle (#12).
+
+    The token corroborates the handle: HWNDs are recycled by the OS after a
+    window is destroyed, so a stored ref also records *which process
+    generation* owned the window at capture time. (0, None) when nothing
+    can be read — unknown identity is checked against nothing, never
+    treated as a match or a mismatch by itself.
+    """
+    if not window_handle:
+        return 0, None
+    try:
+        _, pid = win32process.GetWindowThreadProcessId(window_handle)
+    except Exception:
+        return 0, None
+    if not pid:
+        return 0, None
+    try:
+        token = Process(pid).create_time()
+    except Exception:
+        token = None
+    return pid, token
+
+
+def find_controls_by_identity(
+    root,
+    *,
+    control_type: str,
+    automation_id: str,
+    name: str,
+    max_nodes: int = 20000,
+):
+    """Count live elements matching a stored identity predicate (#12).
+
+    The predicate is control type + AutomationId + stable name; control
+    values and bounds are never identity (the reference counting semantics
+    live in benchmarks/locator-resolution). Returns ``(matches, unproven)``:
+    ``unproven`` is True when at least one candidate whose type matched had
+    a field that could not be read, so a zero count cannot be trusted as
+    proof of absence.
+    """
+    matches = []
+    unproven = False
+    visited = 0
+    queue = [root]
+    while queue:
+        control = queue.pop(0)
+        visited += 1
+        if visited > max_nodes:
+            break
+        try:
+            queue.extend(control.GetChildren())
+        except Exception:
+            pass
+        try:
+            live_type = (control.LocalizedControlType or "").title()
+        except Exception:
+            continue
+        if live_type != control_type:
+            continue
+        try:
+            live_aid = control.AutomationId or ""
+            live_name = (control.Name or "").strip()
+        except Exception:
+            unproven = True
+            continue
+        if live_aid == automation_id and live_name == name:
+            matches.append(control)
+    return matches, unproven
 
 
 class Desktop:
@@ -873,28 +960,44 @@ class Desktop:
         resolving (callers get STALE_REF and re-snapshot).
         """
         self._refs_generation += 1
-        refs: dict[int, ElementRef] = {}
         interactive = list(getattr(tree_state, "interactive_nodes", []) or [])
         scrollable = list(getattr(tree_state, "scrollable_nodes", []) or [])
-        for label, node in enumerate(interactive):
-            refs[label] = ElementRef(
-                label=label,
-                runtime_id=getattr(node, "runtime_id", None),
-                window_handle=getattr(node, "window_handle", 0),
-                name=node.name,
-                control_type=node.control_type,
-                is_password=bool((getattr(node, "metadata", None) or {}).get("is_password")),
+        nodes = interactive + scrollable
+        # Identity evidence per element (#12): the AutomationId, and whether
+        # the (window, control type, AutomationId, name) predicate was
+        # unique in the window at capture time.
+        prepared = []
+        groups: dict[tuple, int] = {}
+        for label, node in enumerate(nodes):
+            metadata = getattr(node, "metadata", None) or {}
+            automation_id = str(metadata.get("automation_id") or "")
+            key = (
+                getattr(node, "window_handle", 0),
+                node.control_type,
+                automation_id,
+                node.name,
             )
-        base = len(interactive)
-        for j, node in enumerate(scrollable):
-            label = base + j
+            groups[key] = groups.get(key, 0) + 1
+            prepared.append((label, node, metadata, automation_id, key))
+        identity_cache: dict[int, tuple[int, float | None]] = {}
+        refs: dict[int, ElementRef] = {}
+        for label, node, metadata, automation_id, key in prepared:
+            handle = getattr(node, "window_handle", 0)
+            if handle not in identity_cache:
+                identity_cache[handle] = _window_identity(handle)
+            pid, token = identity_cache[handle]
             refs[label] = ElementRef(
                 label=label,
                 runtime_id=getattr(node, "runtime_id", None),
-                window_handle=getattr(node, "window_handle", 0),
+                window_handle=handle,
                 name=node.name,
                 control_type=node.control_type,
-                is_password=bool((getattr(node, "metadata", None) or {}).get("is_password")),
+                is_password=bool(metadata.get("is_password")),
+                automation_id=automation_id,
+                description=str(metadata.get("help_text") or ""),
+                window_pid=pid,
+                window_process_token=token,
+                unique_at_capture=groups[key] == 1,
             )
         self._element_refs = refs
         return self._refs_generation
@@ -919,8 +1022,7 @@ class Desktop:
                 f"STALE_REF: no element with label {label} in snapshot "
                 f"{self._refs_generation}. Take a new Snapshot."
             )
-        if ref.runtime_id is None or not ref.window_handle:
-            raise StaleRefError(
+        if (ref.runtime_id is None and not ref.automation_id) or not ref.window_handle:            raise StaleRefError(
                 f"STALE_REF: element {label} ({ref.control_type} \"{ref.name}\") has no UIA "
                 "identity to re-acquire (extracted text or IA2/MSAA node). "
                 "Use Click with its coordinates instead."
@@ -931,22 +1033,88 @@ class Desktop:
                 f"STALE_REF: the window containing element {label} no longer exists. "
                 "Take a new Snapshot."
             )
-        control = find_control_by_runtime_id(root, ref.runtime_id)
-        if control is None:
-            raise StaleRefError(
-                f"STALE_REF: element {label} ({ref.control_type} \"{ref.name}\") no longer "
-                "exists — the UI changed since the snapshot. Take a new Snapshot."
+        self._verify_window_identity(ref)
+        control = None
+        if ref.runtime_id is not None:
+            control = find_control_by_runtime_id(root, ref.runtime_id)
+        if control is not None:
+            try:
+                live_name = (control.Name or "").strip()
+            except Exception:
+                live_name = ref.name
+            if ref.name and live_name != ref.name:
+                raise StaleRefError(
+                    f"STALE_REF: element {label} now shows \"{live_name}\" instead of "
+                    f"\"{ref.name}\" — the UI changed since the snapshot. Take a new Snapshot."
+                )
+            return ref, control
+        # The RuntimeId no longer resolves — the element was probably
+        # re-rendered under a fresh one. Fall back to counting the identity
+        # predicate over the live window (#12): exactly one match resolves,
+        # zero is stale, two or more is ambiguous, and a field that cannot
+        # be read leaves the count unproven instead of guessed.
+        if not ref.unique_at_capture:
+            raise AmbiguousRefError(
+                f"AMBIGUOUS_TARGET: element {label} ({ref.control_type} \"{ref.name}\") "
+                "was not the only element with its identity in the snapshot, and "
+                "its RuntimeId no longer resolves, so no search can pick it out "
+                "safely. Take a new Snapshot; if it is still ambiguous, use "
+                "Click with its coordinates."
             )
-        try:
-            live_name = (control.Name or "").strip()
-        except Exception:
-            live_name = ref.name
-        if ref.name and live_name != ref.name:
-            raise StaleRefError(
-                f"STALE_REF: element {label} now shows \"{live_name}\" instead of "
-                f"\"{ref.name}\" — the UI changed since the snapshot. Take a new Snapshot."
+        matches, unproven = find_controls_by_identity(
+            root,
+            control_type=ref.control_type,
+            automation_id=ref.automation_id,
+            name=ref.name,
+        )
+        if len(matches) == 1:
+            return ref, matches[0]
+        if len(matches) > 1:
+            raise AmbiguousRefError(
+                f"AMBIGUOUS_TARGET: {len(matches)} live elements match element "
+                f"{label}'s identity ({ref.control_type} \"{ref.name}\"). "
+                "Refusing to guess. Take a new Snapshot."
             )
-        return ref, control
+        if unproven:
+            raise TimeoutError(
+                f"RESOLUTION_UNKNOWN: element {label}'s identity could not be "
+                "proven — a field needed for matching could not be read from "
+                "the live window. Take a new Snapshot."
+            )
+        raise StaleRefError(
+            f"STALE_REF: element {label} ({ref.control_type} \"{ref.name}\") no longer "
+            "exists — the UI changed since the snapshot. Take a new Snapshot."
+        )
+
+    def _verify_window_identity(self, ref: ElementRef) -> None:
+        """Fail closed when the ref's window handle changed owner (#12).
+
+        HWNDs are recycled: after the original window closes, the same
+        handle can belong to a different window, possibly in a restarted
+        process. The ref records the owning pid and the process
+        creation-time token at capture; a proven mismatch means the handle
+        no longer names the window the snapshot saw. Unknown values (never
+        captured, or unreadable now) prove nothing and do not block.
+        """
+        if not ref.window_pid and ref.window_process_token is None:
+            return
+        pid, token = _window_identity(ref.window_handle)
+        if ref.window_pid and pid and pid != ref.window_pid:
+            raise StaleRefError(
+                f"STALE_REF: the window containing element {ref.label} is now "
+                f"owned by a different process (pid {pid}, was {ref.window_pid}) "
+                "— the handle was recycled. Take a new Snapshot."
+            )
+        if (
+            ref.window_process_token is not None
+            and token is not None
+            and abs(token - ref.window_process_token) > 0.01
+        ):
+            raise StaleRefError(
+                f"STALE_REF: the process owning element {ref.label}'s window "
+                "restarted since the snapshot (its creation-time token "
+                "changed) — the handle was recycled. Take a new Snapshot."
+            )
 
     def invoke_element(self, label: int, snapshot: int | None = None) -> ElementRef:
         owner = get_controller()

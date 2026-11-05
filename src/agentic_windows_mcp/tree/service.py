@@ -527,6 +527,8 @@ class Tree:
                             localized_control_type = node.CachedLocalizedControlType
                             metadata:dict[str,Any]={}
                             metadata['has_focused']=node.CachedHasKeyboardFocus
+                            if automation_id:
+                                metadata['automation_id']=automation_id
                             metadata['horizontal_scrollable']=scroll_pattern.HorizontallyScrollable
                             metadata['horizontal_scroll_percent']=round(scroll_pattern.HorizontalScrollPercent,2) if scroll_pattern.HorizontallyScrollable else 0
                             metadata['vertical_scrollable']=scroll_pattern.VerticallyScrollable
@@ -651,6 +653,15 @@ class Tree:
 
                             metadata:dict[str,Any]={}
                             metadata['has_focused']=is_focused
+                            # Identity evidence for strict ref resolution
+                            # (#12): the element's AutomationId, when it has
+                            # one, joins the ref's identity predicate.
+                            try:
+                                automation_id = node.CachedAutomationId
+                                if automation_id:
+                                    metadata['automation_id']=automation_id
+                            except Exception:
+                                pass
                             if accelerator_key:
                                 metadata['shortcut']=accelerator_key
 

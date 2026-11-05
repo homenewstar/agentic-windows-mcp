@@ -12,7 +12,7 @@ STALE_REF error instead of a blind click in the wrong place.
 import re
 
 from mcp.types import ToolAnnotations
-from agentic_windows_mcp.desktop.service import StaleRefError
+from agentic_windows_mcp.desktop.service import AmbiguousRefError, StaleRefError
 from agentic_windows_mcp.infrastructure import with_analytics
 from agentic_windows_mcp.infrastructure.errors import (
     DELIVERED_VERIFIED,
@@ -40,9 +40,9 @@ def parse_ref(ref) -> int:
     )
 
 
-def _stale(e: StaleRefError) -> ValueError:
-    # Surface staleness as a tool error whose text starts with STALE_REF so
-    # agents can branch on it reliably.
+def _stale(e: StaleRefError | AmbiguousRefError) -> ValueError:
+    # Surface resolution failures as tool errors whose text starts with
+    # STALE_REF / AMBIGUOUS_TARGET so agents can branch on them reliably.
     return ValueError(str(e))
 
 
@@ -64,7 +64,7 @@ def register(mcp, *, get_desktop, get_analytics):
         label = parse_ref(ref)
         try:
             element = get_desktop().invoke_element(label, snapshot)
-        except StaleRefError as e:
+        except (StaleRefError, AmbiguousRefError) as e:
             raise _stale(e) from e
         return f"Invoked @e{label}: {element.control_type} \"{element.name}\"."
 
@@ -87,7 +87,7 @@ def register(mcp, *, get_desktop, get_analytics):
         label = parse_ref(ref)
         try:
             element = get_desktop().set_element_value(label, value, snapshot)
-        except StaleRefError as e:
+        except (StaleRefError, AmbiguousRefError) as e:
             raise _stale(e) from e
         if getattr(element, "is_password", False):
             # Secure fields (#15): the value was set but is never echoed
@@ -115,7 +115,7 @@ def register(mcp, *, get_desktop, get_analytics):
         label = parse_ref(ref)
         try:
             element, state = get_desktop().toggle_element(label, snapshot)
-        except StaleRefError as e:
+        except (StaleRefError, AmbiguousRefError) as e:
             raise _stale(e) from e
         state_text = {0: "Off", 1: "On", 2: "Indeterminate"}.get(state, str(state))
         return f"Toggled @e{label}: {element.control_type} \"{element.name}\" — now {state_text}."

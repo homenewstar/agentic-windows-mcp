@@ -72,6 +72,7 @@ EXPECTED_TOOLS = {
     "FileSystem",
     "Find",
     "Get",
+    "Guide",
     "Invoke",
     "Is",
     "JobOutput",

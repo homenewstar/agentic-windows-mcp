@@ -12,7 +12,7 @@ from agentic_windows_mcp.vdm.core import (
 from agentic_windows_mcp.desktop.views import DesktopState, Window, Browser, Status, Size, Display
 from agentic_windows_mcp.tree.views import BoundingBox, TreeElementNode, TreeState, SemanticNode
 from PIL import ImageFont, ImageDraw, Image
-from agentic_windows_mcp.tree.service import Tree
+from agentic_windows_mcp.tree.service import Tree, _window_process_name
 from agentic_windows_mcp.desktop import screenshot as screenshot_capture
 from agentic_windows_mcp.desktop.control import get_controller
 from agentic_windows_mcp.desktop import flash_overlay
@@ -512,6 +512,11 @@ class Desktop:
         # reads window names, centers and static text from it, so its
         # results always describe the same capture the refs came from.
         self._refs_tree_state = None
+        # Label -> snapshot node behind each ref (#18). Registration is
+        # positional in wholesale mode, but drill-down merges keep
+        # existing labels while appending new ones, so label order and
+        # node-list order can diverge; this map stays authoritative.
+        self._refs_nodes: dict[int, object] = {}
 
     def get_state(
         self,
@@ -526,6 +531,8 @@ class Desktop:
         region: list[int] | tuple[int, ...] | None = None,
         max_image_size: Size | None = None,
         max_tree_elements: int | None = None,
+        window_handle: int | None = None,
+        tree_state_override: TreeState | None = None,
     ) -> DesktopState:
         use_annotation = use_annotation is True or (
             isinstance(use_annotation, str) and use_annotation.lower() == "true"
@@ -601,7 +608,15 @@ class Desktop:
         logger.debug(f"Active window: {active_window or 'No Active Window Found'}")
         logger.debug(f"Windows: {windows}")
 
-        if use_ui_tree:
+        if use_ui_tree and tree_state_override is not None:
+            # Drill-down (#18): the subtree was captured by the caller.
+            tree_state = tree_state_override
+        elif use_ui_tree and window_handle is not None:
+            # Window scope (#18): capture only this window's tree.
+            tree_state = self.tree.get_state(
+                window_handle, [], use_dom=use_dom, min_elements=max_tree_elements
+            )
+        elif use_ui_tree:
             other_windows_handles = set(controls_handles - windows_handles)
             if active_window_handle is not None:
                 other_windows_handles.discard(active_window_handle)
@@ -1129,23 +1144,67 @@ class Desktop:
             results.append((element_node.center.x, element_node.center.y))
         return results
 
+    def find_window_candidates(self, query: str) -> list[dict]:
+        """Top-level windows matching a title substring or process name (#18).
+
+        Returns [{"handle", "title", "process"}] in enumeration order.
+        The caller decides what zero results (no such window) or several
+        (ambiguous — never guess) mean; this never picks one itself.
+        """
+        query = (query or "").strip().lower()
+        if not query:
+            return []
+        controls_handles = self.get_controls_handles()
+        windows, _handles = self.get_windows(controls_handles=controls_handles)
+        active = self.get_active_window(windows=windows)
+        if active is not None and active not in windows:
+            windows = [active, *windows]
+        candidates = []
+        seen: set[int] = set()
+        for window in windows:
+            handle = window.handle
+            if handle in seen:
+                continue
+            seen.add(handle)
+            title = window.name or ""
+            process = _window_process_name(handle) or ""
+            if (
+                query in title.lower()
+                or query == process.lower()
+                or query == process.lower().removesuffix(".exe")
+            ):
+                candidates.append(
+                    {"handle": handle, "title": title, "process": process}
+                )
+        return candidates
+
     # ---- Element refs (issue #3) ----
 
     @property
     def refs_generation(self) -> int:
         return self._refs_generation
 
-    def register_element_refs(self, tree_state) -> int:
+    def register_element_refs(self, tree_state, *, extend: bool = False) -> int:
         """Snapshot the identity of every labelled element for ref tools.
 
         Called by the Snapshot tool on each capture; replaces the previous
         registry wholesale, so refs issued by an older snapshot stop
         resolving (callers get STALE_REF and re-snapshot).
+
+        With ``extend=True`` (drill-down captures, #18) the new nodes are
+        instead merged into the current registry: an element the parent
+        snapshot already labelled keeps its label, new elements append,
+        and the generation — the identity scope — is unchanged, so refs
+        from the parent snapshot and the drill-down stay valid together.
         """
-        self._refs_generation += 1
         interactive = list(getattr(tree_state, "interactive_nodes", []) or [])
         scrollable = list(getattr(tree_state, "scrollable_nodes", []) or [])
         nodes = interactive + scrollable
+        merged = self._merged_ref_nodes(nodes) if extend and self._element_refs else None
+        if merged is not None:
+            nodes = merged
+        else:
+            self._refs_generation += 1
         # Identity evidence per element (#12): the AutomationId, and whether
         # the (window, control type, AutomationId, name) predicate was
         # unique in the window at capture time.
@@ -1183,8 +1242,42 @@ class Desktop:
                 unique_at_capture=groups[key] == 1,
             )
         self._element_refs = refs
+        self._refs_nodes = {label: node for label, node in enumerate(nodes)}
         self._refs_tree_state = tree_state
         return self._refs_generation
+
+    def _merged_ref_nodes(self, new_nodes) -> list | None:
+        """Node list for an extend registration (#18), or None to fall back.
+
+        The current registry's nodes in label order, with the new
+        capture's nodes merged in: a node whose (window handle,
+        RuntimeId) matches an existing ref takes that ref's slot — the
+        fresher capture of the same element — and genuinely new nodes
+        append in encounter order. Returns None when the tracked nodes
+        do not cover the registry (not reachable through the public
+        API), where merging would corrupt the label mapping.
+        """
+        tracked = getattr(self, "_refs_nodes", None) or {}
+        if len(tracked) != len(self._element_refs):
+            return None
+        existing_by_identity = {}
+        for label, ref in self._element_refs.items():
+            if ref.runtime_id is not None:
+                existing_by_identity[(ref.window_handle, tuple(ref.runtime_id))] = label
+        merged: dict[int, object] = dict(tracked)
+        next_label = max(merged) + 1 if merged else 0
+        for node in new_nodes:
+            runtime_id = getattr(node, "runtime_id", None)
+            label = None
+            if runtime_id is not None:
+                label = existing_by_identity.get(
+                    (getattr(node, "window_handle", 0), tuple(runtime_id))
+                )
+            if label is None:
+                label = next_label
+                next_label += 1
+            merged[label] = node
+        return [merged[label] for label in sorted(merged)]
 
     def resolve_element_ref(self, label: int, snapshot: int | None = None):
         """Re-acquire the live UIA control behind a snapshot ref.
@@ -1344,8 +1437,12 @@ class Desktop:
         interactive = list(getattr(tree_state, "interactive_nodes", []) or [])
         scrollable = list(getattr(tree_state, "scrollable_nodes", []) or [])
         paths = _semantic_paths(getattr(tree_state, "semantic_tree_root", None))
+        nodes_by_label = getattr(self, "_refs_nodes", None) or {}
 
         def node_for(label):
+            node = nodes_by_label.get(label)
+            if node is not None:
+                return node
             if 0 <= label < len(interactive):
                 return interactive[label]
             idx = label - len(interactive)

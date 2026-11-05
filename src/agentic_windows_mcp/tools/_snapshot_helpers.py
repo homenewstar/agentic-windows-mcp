@@ -69,6 +69,11 @@ def _capture_desktop_state_once(
     element_offset: int = 0,
     element_limit: int | None = None,
     register_refs: bool = False,
+    window_handle: int | None = None,
+    root_control=None,
+    root_window_handle: int | None = None,
+    extend_refs: bool = False,
+    capture_note: str | None = None,
 ):
     profile_enabled = _snapshot_profile_enabled()
     profile_started_at = time.perf_counter()
@@ -92,6 +97,15 @@ def _capture_desktop_state_once(
     # requested page is populated instead of stopping at the default cap.
     max_tree_elements = (element_offset + page_size) if paging else None
 
+    subtree_state = None
+    if root_control is not None:
+        # Drill-down (#18): capture only the ref element's subtree; the
+        # rest of the desktop state (screenshot, windows) is captured as
+        # usual around it.
+        subtree_state = desktop.tree.get_subtree_state(
+            root_control, root_window_handle
+        )
+
     desktop_state = desktop.get_state(
         use_vision=use_vision,
         use_dom=use_dom,
@@ -104,6 +118,8 @@ def _capture_desktop_state_once(
         region=region,
         max_image_size=Size(width=MAX_IMAGE_WIDTH, height=MAX_IMAGE_HEIGHT),
         max_tree_elements=max_tree_elements,
+        window_handle=window_handle,
+        tree_state_override=subtree_state,
     )
     if profile_enabled:
         desktop_state_ms = (time.perf_counter() - stage_started_at) * 1000
@@ -144,7 +160,9 @@ def _capture_desktop_state_once(
 
     refs_generation = None
     if register_refs and use_ui_tree:
-        refs_generation = desktop.register_element_refs(desktop_state.tree_state)
+        refs_generation = desktop.register_element_refs(
+            desktop_state.tree_state, extend=extend_refs
+        )
 
     interactive_page = None
     if paging:
@@ -173,6 +191,7 @@ def _capture_desktop_state_once(
         "screenshot_bytes": screenshot_bytes,
         "interactive_page": interactive_page,
         "refs_generation": refs_generation,
+        "capture_note": capture_note,
     }
 
 
@@ -335,6 +354,29 @@ def build_snapshot_response(
             "ref tools (Invoke/SetValue/Toggle) over coordinates when an element offers "
             f"the pattern; pass snapshot={refs_generation} to guard against staleness.\n"
         )
+        # Completeness (#18): say plainly when the tree below is a
+        # partial observation, and why — a cut node in the tree is
+        # marked [truncated] where it happens.
+        tree_state = desktop_state.tree_state
+        if tree_state is not None and tree_state.is_complete():
+            metadata_text += "Capture Completeness: complete\n"
+        elif tree_state is not None:
+            reasons = []
+            if tree_state.truncated:
+                reasons.append(
+                    f"the {tree_state.element_limit}-element capture limit was hit "
+                    "(cut nodes are marked [truncated] in the tree)"
+                )
+            if not tree_state.status:
+                reasons.append("one or more windows failed to capture")
+            metadata_text += (
+                "Capture Completeness: PARTIAL — "
+                + ("; ".join(reasons) if reasons else "the capture was incomplete")
+                + "\n"
+            )
+    capture_note = capture_result.get("capture_note")
+    if capture_note:
+        metadata_text += f"{capture_note}\n"
     if ui_detail_note:
         metadata_text += f"{ui_detail_note}\n"
 

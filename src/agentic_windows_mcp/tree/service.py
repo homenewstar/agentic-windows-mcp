@@ -896,12 +896,14 @@ class Tree:
             children = CachedControlHelper.get_cached_children(node, children_cache_req)
 
             # Recursively traverse the tree the right to left for normal apps and for DOM traverse from left to right
+            visited_children = 0
             for child in (children if is_dom else reversed(children)):
                 if self.element_budget.exhausted:
                     # Stop descending once the element budget is spent — this is what
                     # bounds traversal time on huge flat lists/grids (thousands of rows),
                     # not just the size of the appended node lists.
                     break
+                visited_children += 1
                 try:
                     # Check if the child is a DOM element
                     if is_browser and child.CachedAutomationId=="RootWebArea":
@@ -945,6 +947,17 @@ class Tree:
                         e,
                     )
                     continue
+            if visited_children < len(children) and self.element_budget.exhausted:
+                # The budget cut this node's children (#18): record the
+                # partial observation explicitly — on the budget itself,
+                # so the capture reports incomplete, and on the semantic
+                # node these children belong to, so "children not shown"
+                # is never mistaken for "no children".
+                self.element_budget.truncated = True
+                if semantic_parent is not None and not is_dom:
+                    semantic_parent.metadata["children_count"] = len(children)
+                    semantic_parent.metadata["children_shown"] = visited_children
+                    semantic_parent.metadata["truncated"] = True
         except TypeError as e:
             if not _is_comtypes_variant_ord_typeerror(e):
                 logger.error(f"Error in tree_traversal: {e}", exc_info=True)
@@ -1112,6 +1125,95 @@ class Tree:
         except Exception as e:
             logger.error(f"Error getting nodes for handle {handle}: {e}")
             raise
+
+    def get_subtree_state(self, root_control, window_handle: int) -> TreeState:
+        """Capture only the subtree under one element (issue #18 drill-down).
+
+        Runs the same native traversal get_nodes uses for a whole window,
+        rooted at an arbitrary live element instead of a window handle, so
+        the subtree's nodes carry the same identity evidence (RuntimeId,
+        AutomationId, window handle) as a full capture and their refs can
+        extend the parent snapshot's registry. The browser/DOM path is not
+        entered: a drill-down observes the native UIA subtree.
+        """
+        self.dom = None
+        self.dom_bounding_box = None
+        self.dom_is_ia2 = False
+        self.element_budget = TreeElementBudget(resolve_max_tree_elements())
+        start_time = perf_counter()
+
+        element_cache_req = CacheRequestFactory.create_tree_traversal_cache()
+        element_cache_req.TreeScope = TreeScope.TreeScope_Element
+        children_cache_req = CacheRequestFactory.create_tree_traversal_cache()
+        children_cache_req.TreeScope = TreeScope.TreeScope_Element | TreeScope.TreeScope_Children
+
+        window_name = ""
+        try:
+            window_control = ControlFromHandle(window_handle)
+            if window_control is not None:
+                window_name = self.app_name_correction(window_control.Name.strip())
+        except Exception:
+            window_name = ""
+        root_name = ""
+        try:
+            root_name = root_control.Name.strip()
+        except Exception:
+            root_name = ""
+        if not window_name:
+            window_name = root_name
+
+        window_bounding_box = root_control.BoundingRectangle
+        root_sem_node = SemanticNode(
+            control_type=root_control.LocalizedControlType.title(),
+            element_type="window" if isinstance(root_control, WindowControl) else "structural",
+            name=root_name,
+            window_name=window_name,
+        )
+        interactive_nodes: list[TreeElementNode] = []
+        scrollable_nodes: list[ScrollElementNode] = []
+        dom_interactive_nodes: list[TreeElementNode] = []
+        dom_informative_nodes: list[TextElementNode] = []
+        self.tree_traversal(
+            root_control, window_bounding_box, window_name, False,
+            interactive_nodes, scrollable_nodes, dom_interactive_nodes,
+            dom_informative_nodes, is_dom=False, is_dialog=False,
+            element_cache_req=element_cache_req,
+            children_cache_req=children_cache_req,
+            current_semantic_node=root_sem_node,
+            window_handle=window_handle,
+        )
+        _reverse_children_order(root_sem_node)
+        interactive_nodes.extend(dom_interactive_nodes)
+        root_box = BoundingBox(
+            left=window_bounding_box.left,
+            top=window_bounding_box.top,
+            right=window_bounding_box.right,
+            bottom=window_bounding_box.bottom,
+            width=window_bounding_box.width(),
+            height=window_bounding_box.height(),
+        )
+        end_time = perf_counter()
+        return TreeState(
+            status=True,
+            root_node=TreeElementNode(
+                bounding_box=root_box,
+                center=root_box.get_center(),
+                name=root_name,
+                control_type=root_sem_node.control_type,
+                window_name=window_name,
+                metadata={},
+                runtime_id=_runtime_identity(root_control),
+                window_handle=window_handle,
+            ),
+            dom_node=None,
+            interactive_nodes=interactive_nodes,
+            scrollable_nodes=scrollable_nodes,
+            dom_informative_nodes=dom_informative_nodes,
+            capture_sec=end_time - start_time,
+            semantic_tree_root=root_sem_node,
+            truncated=self.element_budget.truncated,
+            element_limit=self.element_budget.limit,
+        )
 
     def on_focus_change(self, sender: Any):
         """Handle focus change events."""

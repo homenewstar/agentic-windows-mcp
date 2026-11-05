@@ -10,12 +10,14 @@ from agentic_windows_mcp.desktop.image_post import (
     process_screenshot,
     validate_screenshot_options,
 )
+from agentic_windows_mcp.desktop.service import AmbiguousRefError, StaleRefError
 from agentic_windows_mcp.tools._snapshot_helpers import (
     _as_bool,
     _as_region,
     capture_desktop_state,
     build_snapshot_response,
 )
+from agentic_windows_mcp.tools.elements import parse_ref
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ def register(mcp, *, get_desktop, get_analytics):
     global state_tool, screenshot_tool
     @mcp.tool(
         name='Snapshot',
-        description="Take a screenshot and inspect the screen. Keywords: screenshot, screen capture, see screen, observe, look, inspect, UI elements, what's on screen. Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot with cursor highlight. Set use_annotation=False to get a clean screenshot without bounding box overlays on UI elements (default: True, draws colored rectangles around detected elements). Set use_ui_tree=False for a faster screenshot-only snapshot when you do not need interactive or scrollable element extraction. Set width_reference_lines/height_reference_lines to overlay a grid for better spatial reasoning (make sure vision is enabled to use it). Set use_dom=True for browser content to get web page elements instead of browser UI. Set display=[0] or display=[0,1] using zero-based active Windows display indices; omit it to keep the default full-desktop behavior. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture and inspect only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Dense windows are captured up to an element limit (500 by default): set offset/limit to page through the full interactive element list — the response then includes an 'Interactive Elements Page' section with each element's global index (the same numbering label-based tools accept), the total captured count, and the next offset when more remain. Always call this first to understand the current desktop state before taking actions.",
+        description="Take a screenshot and inspect the screen. Keywords: screenshot, screen capture, see screen, observe, look, inspect, UI elements, what's on screen. Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot with cursor highlight. Set use_annotation=False to get a clean screenshot without bounding box overlays on UI elements (default: True, draws colored rectangles around detected elements). Set use_ui_tree=False for a faster screenshot-only snapshot when you do not need interactive or scrollable element extraction. Set width_reference_lines/height_reference_lines to overlay a grid for better spatial reasoning (make sure vision is enabled to use it). Set use_dom=True for browser content to get web page elements instead of browser UI. Set display=[0] or display=[0,1] using zero-based active Windows display indices; omit it to keep the default full-desktop behavior. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture and inspect only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Dense windows are captured up to an element limit (500 by default): set offset/limit to page through the full interactive element list — the response then includes an 'Interactive Elements Page' section with each element's global index (the same numbering label-based tools accept), the total captured count, and the next offset when more remain. Scope the capture with window=<handle> or window='<title or process name>' to capture only one window's tree and refs (an ambiguous name returns the candidate handles instead of guessing). Re-observe a single element's subtree with root_ref='@e12': the drill-down capture extends the current snapshot's refs — same Snapshot ID, existing refs keep their labels, new elements append — instead of replacing them. Every capture reports 'Capture Completeness': when the element budget cuts the walk the capture is marked PARTIAL and each cut node is marked [truncated] with its child count, so 'children not shown' is never mistaken for 'no children'. Always call this first to understand the current desktop state before taking actions.",
         annotations=ToolAnnotations(
             title="Snapshot",
             readOnlyHint=True,
@@ -49,6 +51,8 @@ def register(mcp, *, get_desktop, get_analytics):
         region: list[int] | str | None = None,
         offset: int = 0,
         limit: int | None = None,
+        window: int | str | None = None,
+        root_ref: str | int | None = None,
         ctx: Context = None,
     ):
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
@@ -57,6 +61,75 @@ def register(mcp, *, get_desktop, get_analytics):
             isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 5000
         ):
             raise ValueError("limit must be an integer between 1 and 5000")
+        if window is not None and root_ref is not None:
+            raise ValueError("Pass either window or root_ref, not both.")
+        # Window scope (#18): an int is a window handle; a string is
+        # resolved against window titles and process names, and an
+        # ambiguous string returns the candidate list instead of
+        # guessing. The screenshot still covers the screen as usual —
+        # the scope restricts the captured tree and its refs.
+        window_handle = None
+        if isinstance(window, bool):
+            raise ValueError(
+                "window must be a window handle (int) or a title/process name (str)"
+            )
+        if isinstance(window, int):
+            window_handle = window
+        elif isinstance(window, str):
+            candidates = get_desktop().find_window_candidates(window)
+            if not candidates:
+                return [
+                    f"No window matches {window!r}. Call Snapshot without "
+                    "a window scope to list the open windows."
+                ]
+            if len(candidates) > 1:
+                lines = [
+                    f"{len(candidates)} windows match {window!r} — "
+                    "call again with the handle of the one you mean:"
+                ]
+                for candidate in candidates:
+                    lines.append(
+                        f"- handle {candidate['handle']}: "
+                        f"\"{candidate['title']}\" "
+                        f"(process {candidate['process'] or 'unknown'})"
+                    )
+                return ["\n".join(lines)]
+            window_handle = candidates[0]["handle"]
+        elif window is not None:
+            raise ValueError(
+                "window must be a window handle (int) or a title/process name (str)"
+            )
+        # Drill-down (#18): re-observe only one element's subtree. The
+        # ref is resolved strictly against the current snapshot, and the
+        # subtree's refs extend that snapshot's registry — same Snapshot
+        # ID, same numbering — instead of replacing it.
+        root_control = None
+        root_window_handle = None
+        extend_refs = False
+        capture_note = None
+        if root_ref is not None:
+            if region is not None or display is not None:
+                raise ValueError(
+                    "root_ref cannot be combined with region or display — "
+                    "the ref defines the capture root."
+                )
+            label = parse_ref(root_ref)
+            try:
+                ref, root_control = get_desktop().resolve_element_ref(label)
+            except (StaleRefError, AmbiguousRefError) as e:
+                raise ValueError(str(e)) from e
+            root_window_handle = ref.window_handle
+            extend_refs = True
+            capture_note = (
+                f"Drill-Down: subtree of @e{label} ({ref.control_type} "
+                f"\"{ref.name}\") — refs continue the current snapshot's "
+                "numbering and identity scope."
+            )
+        if window_handle is not None:
+            capture_note = (
+                f"Scope: window handle {window_handle} only — the tree "
+                "and refs below cover that window alone."
+            )
         try:
             capture_result = capture_desktop_state(
                 get_desktop(),
@@ -72,6 +145,11 @@ def register(mcp, *, get_desktop, get_analytics):
                 element_offset=offset,
                 element_limit=limit,
                 register_refs=True,
+                window_handle=window_handle,
+                root_control=root_control,
+                root_window_handle=root_window_handle,
+                extend_refs=extend_refs,
+                capture_note=capture_note,
             )
         except Exception as e:
             logger.warning(

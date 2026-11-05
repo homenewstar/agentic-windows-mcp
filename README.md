@@ -304,15 +304,26 @@ DeepSeek (and other models) connect in two ways:
 
 ---
 
-## 🧰 The toolset (40 tools)
+## 🧰 The toolset (49 tools)
 
 | Group | Tools |
 |---|---|
 | **Desktop control** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
+| **Element refs & queries** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is` |
 | **Apps & system** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
 | **Control gate** | `ControlStatus` (who currently holds control, which policy applies) |
 | **Browser (CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **Deep DevTools** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
+
+### Scoped snapshots, drill-down, and honest partial captures
+
+`Snapshot` can narrow what it captures instead of always walking the whole desktop:
+
+- **Window scope** — `window=<handle>` or `window="<title or process name>"` captures only that window's tree and refs. A name that matches several windows returns the candidate handles rather than guessing; the refs from a scoped capture work with `Invoke`/`SetValue`/`Toggle` like any other snapshot's.
+- **Drill-down** — `root_ref='@e12'` re-observes only that element's subtree. The subtree's refs *extend* the current snapshot: elements already labelled keep their labels, new elements append, and the Snapshot ID is unchanged, so parent and drill-down refs stay valid together.
+- **Completeness** — every capture reports `Capture Completeness`. When the element budget cuts the walk, the capture is `PARTIAL` and each cut node in the tree is marked `[truncated — N children, not all shown]`, so "children not shown" is never mistaken for "no children" (a cut container is kept in the tree precisely so the marker survives).
+
+Chromium/Electron wrapper containers were evaluated for explicit skipping: anonymous no-name containers already never become semantic-tree nodes and never consume the element budget (the budget counts only elements actually emitted), while the walk still descends through them to reach actionable descendants — so output size is already wrapper-free without hiding any native container, and no additional Chromium-gated skipping is applied.
 
 ---
 

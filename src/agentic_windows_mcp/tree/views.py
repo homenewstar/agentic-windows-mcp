@@ -171,7 +171,18 @@ def _render_semantic_node(node: SemanticNode, lines: list[str], prefix: str, is_
         lines.append("desktop")
     else:
         connector = "└── " if is_last else "├── "
-        lines.append(f"{prefix}{connector}{_format_semantic_node(node)}")
+        line = f"{prefix}{connector}{_format_semantic_node(node)}"
+        # Partial-observation marker (#18): the capture budget cut this
+        # node's children, so an empty/short child list here means
+        # "children not shown", never "no children".
+        if node.metadata.get("truncated"):
+            total = node.metadata.get("children_count")
+            line += (
+                f"  [truncated — {total} children, not all shown]"
+                if total is not None
+                else "  [truncated — children not all shown]"
+            )
+        lines.append(line)
 
     if not node.children:
         return
@@ -186,7 +197,9 @@ def _prune_structural(node: SemanticNode) -> bool:
     """Remove structural nodes that ended up with no children. Returns True = keep."""
     node.children = [c for c in node.children if _prune_structural(c)]
     if node.element_type == "structural" and not node.children:
-        return False
+        # A budget-cut container (#18) stays even with no shown children:
+        # removing it would hide the fact that children exist unseen.
+        return bool(node.metadata.get("truncated"))
     return True
 
 
@@ -209,6 +222,11 @@ class TreeState:
     semantic_tree_root: "SemanticNode | None" = None
     truncated: bool = False
     element_limit: int = 0
+
+    def is_complete(self) -> bool:
+        """True when this capture saw everything it set out to see (#18):
+        no window failed and the element budget never cut the walk."""
+        return bool(self.status) and not self.truncated
 
     def semantic_tree_to_string(self) -> str:
         if not self.semantic_tree_root:

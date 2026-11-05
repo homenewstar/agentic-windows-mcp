@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 # bounds how often the handler itself may run.
 _UNAVAILABLE_LATCH_GRACE_SECONDS = 60.0
 
+# Issue #25 escalation: when in-process thread restarts demonstrably
+# cannot clear a fault — this many failed recovery attempts, or this
+# many latch-triggered attempts despite restarts succeeding — the next
+# trigger escalates to a process exit (via the registered escalation
+# handler) so the external supervisor rebuilds the process. Attempts
+# are counted inside a sliding window; the 120s recovery cooldown
+# still bounds how often any of this can happen.
+_ESCALATION_WINDOW_SECONDS = 900.0
+_ESCALATION_FAILURE_THRESHOLD = 2
+_ESCALATION_LATCH_THRESHOLD = 3
+
 
 class ControlBlocked(RuntimeError):
     def __init__(self, code: str, status: dict):
@@ -98,6 +109,15 @@ class ControlCoordinator:
         self._last_fault: dict | None = None
         self._last_recovery_at = 0.0
         self._recovery_lock = threading.Lock()
+        # Issue #25 escalation bookkeeping: monotonic timestamps of
+        # failed recovery attempts and of latch-triggered attempts
+        # inside the escalation window, plus the exit hook the server
+        # registers (None = record and log only, never exit).
+        self._failed_recovery_at: list[float] = []
+        self._latch_recovery_at: list[float] = []
+        self._escalation_handler: Callable[[str], None] | None = None
+        # Reason of an earned escalation deferred until calls drain.
+        self._escalation_pending_reason: str | None = None
         # When the coordinator entered "unavailable" (monotonic), or None
         # while it is in any other state. A latched unavailable that the
         # worker loop's rehook recovery could not clear becomes a recovery
@@ -253,6 +273,10 @@ class ControlCoordinator:
             ),
             "wedged": wedged,
             "recovery_enabled": bool(self.health_recovery and self._recovery_handler),
+            "escalation_armed": bool(
+                self.health_recovery and self._escalation_handler
+            ),
+            "escalation_pending": bool(self._escalation_pending_reason),
             "recovery_events": list(self._recovery_events[-5:]),
             # Latch diagnostics: why a non-wedged "unavailable" is being
             # held — an emergency fault latch, and any AI input holds the
@@ -275,8 +299,91 @@ class ControlCoordinator:
         """
         self._recovery_handler = handler
 
+    def set_escalation_handler(self, handler: Callable[[str], None] | None) -> None:
+        """Register the process-exit action for unrecoverable faults (#25).
+
+        Consulted only when ``health_recovery`` is enabled and the
+        in-process recovery record proves thread restarts cannot clear
+        the fault (repeated failed attempts, or the latch re-tripping
+        despite successful restarts). The coordinator records the
+        escalation in recovery_events and logs it *before* invoking the
+        handler, and never invokes it while a call is active. With no
+        handler registered the escalation is still recorded and logged —
+        exiting is a deployment wiring decision (see __main__).
+        """
+        self._escalation_handler = handler
+
+    def _escalation_reason(self) -> str | None:
+        """Why the recovery record proves thread restarts cannot clear
+        the fault (#25), or None while another in-process attempt is
+        still worth making. Prunes the sliding window as a side effect.
+        """
+        cutoff = time.monotonic() - _ESCALATION_WINDOW_SECONDS
+        self._failed_recovery_at = [
+            t for t in self._failed_recovery_at if t >= cutoff
+        ]
+        self._latch_recovery_at = [
+            t for t in self._latch_recovery_at if t >= cutoff
+        ]
+        if len(self._failed_recovery_at) >= _ESCALATION_FAILURE_THRESHOLD:
+            return "repeated_recovery_failures"
+        if len(self._latch_recovery_at) >= _ESCALATION_LATCH_THRESHOLD:
+            return "latch_retrips"
+        return None
+
+    def _escalate(self, reason: str, *, trigger: str) -> bool:
+        """Issue #25: hand the fault to the process supervisor.
+
+        The escalation is appended to recovery_events and logged BEFORE
+        the handler runs, so the ControlStatus response that triggered
+        it (status() re-snapshots when this returns True) already names
+        it. Callers must guarantee no call is active — _maybe_recover
+        defers via _escalation_pending_reason instead of calling this.
+        With no handler registered the escalation is still recorded and
+        logged; the exit itself is deployment wiring (see __main__).
+        """
+        self._escalation_pending_reason = None
+        event = {
+            "action": "process_restart_escalation",
+            "outcome": (
+                "escalating to process restart: in-process recovery "
+                f"cannot clear the fault ({reason})"
+            ),
+            "trigger": trigger,
+            "reason": reason,
+            "at_monotonic": round(time.monotonic(), 1),
+        }
+        with self._lock:
+            self._recovery_events.append(event)
+        logger.critical("Control channel recovery escalation: %s", event)
+        handler = self._escalation_handler
+        if handler is None:
+            logger.critical(
+                "Escalation handler not registered; process exit skipped"
+            )
+            return True
+        try:
+            handler(reason)
+        except Exception:
+            logger.exception("Escalation handler failed")
+        return True
+
     def _maybe_recover(self, result: dict) -> bool:
         health = result.get("health") or {}
+        if not (self.health_recovery and self._recovery_handler):
+            return False
+        # Issue #25: an escalation earned earlier but deferred because a
+        # call was active fires as soon as the calls drain. The recovery
+        # record already proved thread restarts cannot clear the fault;
+        # a momentarily healthy poll does not disprove that record, so
+        # this check precedes the trigger and cooldown gates.
+        pending_reason = self._escalation_pending_reason
+        if (
+            pending_reason is not None
+            and not self._active_calls
+            and not self._stop.is_set()
+        ):
+            return self._escalate(pending_reason, trigger="deferred")
         # Two triggers share the same scoped handler (a restart of the
         # input monitor/watchdog threads via stop()+start()):
         #  - "wedged": the conservative health verdict (dead watchdog,
@@ -296,11 +403,7 @@ class ControlCoordinator:
             >= _UNAVAILABLE_LATCH_GRACE_SECONDS
             and not self._stop.is_set()
         )
-        if not (
-            self.health_recovery
-            and self._recovery_handler
-            and (health.get("wedged") or latched)
-        ):
+        if not (health.get("wedged") or latched):
             return False
         if time.monotonic() - self._last_recovery_at < 120.0:
             return False
@@ -309,6 +412,18 @@ class ControlCoordinator:
         trigger = "wedged" if health.get("wedged") else "unavailable_latch"
         try:
             self._last_recovery_at = time.monotonic()
+            # Issue #25: once the record proves thread restarts cannot
+            # clear the fault, escalate instead of spending another
+            # attempt — or defer while a call is active (never exit
+            # mid-call); the deferred escalation fires from the pending
+            # check above once the calls drain.
+            reason = self._escalation_reason()
+            if reason is not None:
+                if self._active_calls:
+                    self._escalation_pending_reason = reason
+                    return True
+                return self._escalate(reason, trigger=trigger)
+            failed = False
             try:
                 outcome = self._recovery_handler()
                 event = {
@@ -317,11 +432,16 @@ class ControlCoordinator:
                     "trigger": trigger,
                 }
             except Exception as e:  # Recovery must never take status down.
+                failed = True
                 event = {
                     "action": "wedged_channel_recovery",
                     "outcome": f"error: {type(e).__name__}: {e}",
                     "trigger": trigger,
                 }
+            if failed:
+                self._failed_recovery_at.append(self._last_recovery_at)
+            if trigger == "unavailable_latch":
+                self._latch_recovery_at.append(self._last_recovery_at)
             event["at_monotonic"] = round(self._last_recovery_at, 1)
             with self._lock:
                 self._recovery_events.append(event)

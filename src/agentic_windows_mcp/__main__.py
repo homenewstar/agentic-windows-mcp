@@ -354,6 +354,23 @@ def _build_mcp() -> FastMCP:
 
             controller.set_recovery_handler(_restart_control_monitors)
 
+            # Issue #25: when the recovery record proves thread restarts
+            # cannot clear the fault, exit non-zero so the existing
+            # supervision (scheduled task / revive port-watch) rebuilds
+            # the process. The coordinator records the escalation in
+            # recovery_events before invoking this; the short delay lets
+            # that ControlStatus response flush first.
+            def _escalate_process_restart(reason: str) -> None:
+                logger.critical(
+                    "Control channel fault (%s) survived in-process "
+                    "recovery; exiting with code 3 so the supervisor "
+                    "rebuilds the process",
+                    reason,
+                )
+                threading.Timer(0.5, os._exit, args=(3,)).start()
+
+            controller.set_escalation_handler(_escalate_process_restart)
+
         try:
             if controller.enabled:
                 control_overlay.start()

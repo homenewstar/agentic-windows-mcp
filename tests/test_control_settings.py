@@ -124,9 +124,12 @@ def test_disabled_start_status_and_cleanup(monkeypatch):
             "monitor_beat_age_seconds": None,
             "wedged": False,
             "recovery_enabled": False,
+            "escalation_armed": False,
+            "escalation_pending": False,
             "recovery_events": [],
             "emergency": False,
             "pending_holds": ["key"],
+            "last_fault": None,
         },
     }
     assert owner.input_ledger.pending() == ("key",)

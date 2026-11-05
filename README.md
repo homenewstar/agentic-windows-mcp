@@ -363,6 +363,14 @@ Windows blocks input from a lower-integrity process to a higher-integrity window
 
 Terminating the wrong process breaks the user's desktop session, so the process-kill path refuses a protected list of session-critical images outright, before any termination attempt: `explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`. The refusal is a typed `PROTECTED_PROCESS` error and is enforced in the shared kill path, so every consumer (the Process tool today, any future one) behaves identically. Matching is the **exact image name**, case-insensitive — never a substring — so a lookalike app such as `explorer-notes.exe` remains closable.
 
+## 🧲 Release guards for multi-event sequences
+
+Sequences that hold physical state — a drag's mouse button, MultiSelect's Ctrl, a SendKeys chord, even a single click's down/up pair — arm a release guard before their first event, so an abort (exception, gate preemption, takeover) cannot leave a button or modifier logically held:
+
+- **Ledger-tracked holds** (drag, Ctrl-multi-select): the input ledger records the hold *before* injecting the down, and the sequence releases it in a `finally`. The release never masks the outcome: if the sequence failed, its error propagates; if it completed but the release could not be delivered, the result is a typed `RELEASE_UNCONFIRMED` error (disposition `delivered_unverified`, retry unsafe) instead of a clean-looking success.
+- **Self-guarded primitives**: `SendKeys` records every key before injecting it and sweeps key-ups for anything still pressed when interrupted; the click primitives attempt one corrective up after a failed up, then report `RELEASE_UNCONFIRMED` if even that cannot be delivered.
+- **Backstop**: on gate loss the coordinator releases every ledger hold, and stale-input recovery sweeps holds whose physical state no longer matches. The two layers cannot double-release: a sequence's own release pops its ledger entry, and the ledger re-checks the physical state before injecting an up, so a user's own physical press is never stolen.
+
 ## 🎯 Action results: delivery & retry dispositions
 
 Every action tool (Click, Type, Scroll, Move, Shortcut, MultiSelect, MultiEdit, Invoke, SetValue, Toggle, PowerShell) ends its result with a machine-readable disposition, and every failure from those tools ends with a typed error envelope:

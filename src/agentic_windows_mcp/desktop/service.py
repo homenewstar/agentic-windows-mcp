@@ -2049,6 +2049,7 @@ class Desktop:
             cx, cy = normalized_from_loc
         self._check_uipi_point(cx, cy, "Drag")
         self._check_uipi_point(x, y, "Drag")
+        completed = False
         try:
             owner.input_ledger.press(
                 "mouse:left",
@@ -2072,8 +2073,25 @@ class Desktop:
                 owner.record_step_current()
                 if interval:
                     sleep(interval)
+            completed = True
         finally:
-            owner.input_ledger.release("mouse:left")
+            # The release must never mask the outcome (#23): when the drag
+            # itself failed, its error propagates and a release failure is
+            # only logged; when the drag completed but the release could
+            # not be delivered, the honest result is RELEASE_UNCONFIRMED —
+            # the button may still be held.
+            try:
+                owner.input_ledger.release("mouse:left")
+            except Exception as release_error:
+                if completed:
+                    raise RuntimeError(
+                        f"RELEASE_UNCONFIRMED: the drag reached ({x}, {y}) but "
+                        "releasing the left mouse button could not be confirmed; "
+                        "the button may still be held."
+                    ) from release_error
+                logger.warning(
+                    "drag aborted and its mouse release also failed: %r", release_error
+                )
         return {"start": [cx, cy], "end": [x, y], "duration": effective_duration}
 
     def move(self, loc: tuple[int, int]):
@@ -2107,6 +2125,7 @@ class Desktop:
         points = [self._normalize_drag_point(loc, f"locs[{i}]") for i, loc in enumerate(locs)]
         for px, py in points:
             self._check_uipi_point(px, py, "MultiSelect")
+        completed = False
         try:
             if press_ctrl:
                 owner.input_ledger.press(
@@ -2120,9 +2139,23 @@ class Desktop:
                 uia.Click(x, y, waitTime=0.2)
                 owner.record_step_current()
                 sleep(0.5)
+            completed = True
         finally:
+            # Same non-masking release discipline as drag (#23).
             if press_ctrl:
-                owner.input_ledger.release("key:ctrl")
+                try:
+                    owner.input_ledger.release("key:ctrl")
+                except Exception as release_error:
+                    if completed:
+                        raise RuntimeError(
+                            "RELEASE_UNCONFIRMED: the selection clicks completed "
+                            "but releasing Ctrl could not be confirmed; the "
+                            "modifier may still be held."
+                        ) from release_error
+                    logger.warning(
+                        "multi-select aborted and its Ctrl release also failed: %r",
+                        release_error,
+                    )
 
     def multi_edit(self, locs: list[tuple[int, int, str]]):
         for loc in locs:

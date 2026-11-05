@@ -66,6 +66,15 @@ _PREFIX_RULES = (
     ("UNSUPPORTED_PATTERN:", "ACTION_NOT_SUPPORTED", NOT_DELIVERED, None),
     ("NOT_EDITABLE:", "ACTION_NOT_SUPPORTED", NOT_DELIVERED, None),
     ("AMBIGUOUS_TARGET:", "AMBIGUOUS_TARGET", NOT_DELIVERED, None),
+    # A multi-event sequence delivered its input but the release of a
+    # held button/key could not be confirmed (#23): the action landed,
+    # the desktop may be poisoned — never retry blind.
+    (
+        "RELEASE_UNCONFIRMED:",
+        "RELEASE_UNCONFIRMED",
+        DELIVERED_UNVERIFIED,
+        "check_pending_input_via_control_status_before_retrying",
+    ),
 )
 
 

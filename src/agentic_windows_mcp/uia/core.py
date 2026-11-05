@@ -321,6 +321,43 @@ def SendMessage(handle: int, msg: int, wParam: int, lParam: int) -> int:
     )
 
 
+def _guarded_click(
+    button_name: str,
+    down_flag: int,
+    up_flag: int,
+    x: int,
+    y: int,
+    waitTime: float,
+) -> None:
+    """Emit one click as a guarded down/up sequence (#23).
+
+    A click is a two-event sequence that holds state in between: if the
+    up event fails (or the thread is interrupted) after the down was
+    delivered, the button stays logically held and poisons every later
+    interaction. On any failure after the down, one corrective up is
+    attempted; if even that cannot be delivered, a typed
+    RELEASE_UNCONFIRMED error replaces the original failure so callers
+    never mistake the state for clean. A successful corrective release
+    re-raises the original error — the click did not complete.
+    """
+    SetCursorPos(x, y)
+    AbsoluteMouseEvent(down_flag, x, y)
+    try:
+        time.sleep(0.05)
+        AbsoluteMouseEvent(up_flag, x, y)
+    except BaseException:
+        try:
+            AbsoluteMouseEvent(up_flag, x, y)
+        except BaseException as cleanup_error:
+            raise RuntimeError(
+                f"RELEASE_UNCONFIRMED: the {button_name} mouse button may still "
+                f"be held after the click at ({x}, {y}); its release could not "
+                "be delivered."
+            ) from cleanup_error
+        raise
+    time.sleep(waitTime)
+
+
 def Click(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:
     """
     Simulate mouse click at point x, y.
@@ -328,11 +365,7 @@ def Click(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:
     y: int.
     waitTime: float.
     """
-    SetCursorPos(x, y)
-    AbsoluteMouseEvent(MouseEventFlag.LeftDown, x, y)
-    time.sleep(0.05)
-    AbsoluteMouseEvent(MouseEventFlag.LeftUp, x, y)
-    time.sleep(waitTime)
+    _guarded_click("left", MouseEventFlag.LeftDown, MouseEventFlag.LeftUp, x, y, waitTime)
 
 
 def MiddleClick(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:
@@ -342,11 +375,9 @@ def MiddleClick(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:
     y: int.
     waitTime: float.
     """
-    SetCursorPos(x, y)
-    AbsoluteMouseEvent(MouseEventFlag.MiddleDown, x, y)
-    time.sleep(0.05)
-    AbsoluteMouseEvent(MouseEventFlag.MiddleUp, x, y)
-    time.sleep(waitTime)
+    _guarded_click(
+        "middle", MouseEventFlag.MiddleDown, MouseEventFlag.MiddleUp, x, y, waitTime
+    )
 
 
 def RightClick(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:
@@ -356,11 +387,9 @@ def RightClick(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:
     y: int.
     waitTime: float.
     """
-    SetCursorPos(x, y)
-    AbsoluteMouseEvent(MouseEventFlag.RightDown, x, y)
-    time.sleep(0.05)
-    AbsoluteMouseEvent(MouseEventFlag.RightUp, x, y)
-    time.sleep(waitTime)
+    _guarded_click(
+        "right", MouseEventFlag.RightDown, MouseEventFlag.RightUp, x, y, waitTime
+    )
 
 
 def PressMouse(x: int, y: int, waitTime: float = OPERATION_WAIT_TIME) -> None:

@@ -320,6 +320,17 @@ def find_controls_by_identity(
     return matches, unproven
 
 
+def _rect_tuple(control):
+    """(left, top, right, bottom) of a control, or None when unavailable."""
+    try:
+        rect = control.BoundingRectangle
+    except Exception:
+        return None
+    if rect is None:
+        return None
+    return (rect.left, rect.top, rect.right, rect.bottom)
+
+
 class Desktop:
     def __init__(self):
         self.encoding = getpreferredencoding()
@@ -1116,7 +1127,68 @@ class Desktop:
                 "changed) — the handle was recycled. Take a new Snapshot."
             )
 
-    def invoke_element(self, label: int, snapshot: int | None = None) -> ElementRef:
+    # Poll interval for the actionability battery (#16).
+    _ACTIONABILITY_POLL = 0.05
+
+    def _await_actionable(self, ref, control, *, timeout: float) -> None:
+        """Auto-wait until a resolved element is actionable (#16).
+
+        The transient checks — visible (not offscreen), enabled, bounding
+        rect stable across two reads — are polled until they pass or the
+        budget expires; the expiry error names the check that never
+        passed. Terminal problems (unsupported pattern, read-only value,
+        policy denial, stale ref) are ruled out by the caller *before*
+        this runs, so they never consume the budget. A property a control
+        does not expose reads as passing (getattr default); a property
+        whose read raises counts as "unreadable" and is polled like any
+        other transient state. ``timeout=0`` restores the pre-#16
+        behaviour: dispatch immediately, no battery at all.
+        """
+        try:
+            budget = float(timeout)
+        except (TypeError, ValueError):
+            raise ValueError("wait_timeout must be a number of seconds") from None
+        if budget < 0 or budget > 30:
+            raise ValueError("wait_timeout must be between 0 and 30 seconds")
+        if budget == 0:
+            return
+        deadline = perf_counter() + budget
+        last_failure = "stable"
+        previous_rect = None
+        rect_reads = 0
+        while True:
+            failure = None
+            try:
+                if getattr(control, "IsOffscreen", False):
+                    failure = "visible"
+                elif not getattr(control, "IsEnabled", True):
+                    failure = "enabled"
+                else:
+                    rect = _rect_tuple(control)
+                    if rect is not None:
+                        rect_reads += 1
+                        if previous_rect is not None and rect != previous_rect:
+                            failure = "stable"
+                        previous_rect = rect
+                        if failure is None and rect_reads < 2:
+                            # Stability needs a confirming second read.
+                            failure = "stable"
+            except Exception:
+                failure = "unreadable"
+            if failure is None:
+                return
+            last_failure = failure
+            if perf_counter() >= deadline:
+                raise TimeoutError(
+                    f"ACTIONABILITY_TIMEOUT: element {ref.label} "
+                    f"({ref.control_type} \"{ref.name}\") never became actionable "
+                    f"within {budget:.1f}s — failing check: {last_failure}. "
+                    "Observe the app and retry, or pass wait_timeout=0 to "
+                    "dispatch immediately."
+                )
+            sleep(self._ACTIONABILITY_POLL)
+
+    def invoke_element(self, label: int, snapshot: int | None = None, wait_timeout: float = 3.0) -> ElementRef:
         owner = get_controller()
         owner.checkpoint_current()
         ref, control = self.resolve_element_ref(label, snapshot)
@@ -1127,6 +1199,7 @@ class Desktop:
                 f"UNSUPPORTED_PATTERN: element {label} ({ref.control_type} \"{ref.name}\") "
                 "does not support InvokePattern. Use Click with its coordinates instead."
             )
+        self._await_actionable(ref, control, timeout=wait_timeout)
         owner.checkpoint_current()
         if pattern.Invoke() is False:
             raise RuntimeError(f"InvokePattern.Invoke failed for element {label}")
@@ -1134,7 +1207,7 @@ class Desktop:
         return ref
 
     def set_element_value(
-        self, label: int, value: str, snapshot: int | None = None
+        self, label: int, value: str, snapshot: int | None = None, wait_timeout: float = 3.0
     ) -> ElementRef:
         owner = get_controller()
         owner.checkpoint_current()
@@ -1150,6 +1223,19 @@ class Desktop:
                 "supports neither ValuePattern nor LegacyIAccessible. "
                 "Use the Type tool with its coordinates instead."
             )
+        if pattern is not None:
+            # Editability is a terminal check (#16): a read-only field does
+            # not become writable by waiting, so fail before the battery.
+            try:
+                readonly = bool(pattern.IsReadOnly)
+            except Exception:
+                readonly = False
+            if readonly:
+                raise ValueError(
+                    f"NOT_EDITABLE: element {label} ({ref.control_type} \"{ref.name}\") "
+                    "is read-only; its value cannot be set."
+                )
+        self._await_actionable(ref, control, timeout=wait_timeout)
         owner.checkpoint_current()
         try:
             ok = pattern.SetValue(value) if pattern is not None else legacy.SetValue(value)
@@ -1160,7 +1246,7 @@ class Desktop:
         owner.record_step_current()
         return ref
 
-    def toggle_element(self, label: int, snapshot: int | None = None) -> tuple[ElementRef, object]:
+    def toggle_element(self, label: int, snapshot: int | None = None, wait_timeout: float = 3.0) -> tuple[ElementRef, object]:
         owner = get_controller()
         owner.checkpoint_current()
         ref, control = self.resolve_element_ref(label, snapshot)
@@ -1171,6 +1257,7 @@ class Desktop:
                 f"UNSUPPORTED_PATTERN: element {label} ({ref.control_type} \"{ref.name}\") "
                 "does not support TogglePattern. Use Click with its coordinates instead."
             )
+        self._await_actionable(ref, control, timeout=wait_timeout)
         owner.checkpoint_current()
         if pattern.Toggle() is False:
             raise RuntimeError(f"TogglePattern.Toggle failed for element {label}")

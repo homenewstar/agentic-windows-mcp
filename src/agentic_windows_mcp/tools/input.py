@@ -282,7 +282,8 @@ def register(
             "Performs mouse clicks at specified coordinates [x, y] or passing a UI element's label/id. "
             "Supports button types: 'left' for selection/activation, 'right' for context menus, 'middle'. "
             "Supports clicks: 0=hover only (no click), 1=single click (select/focus), 2=double click (open/activate). "
-            "Provide either loc or label."
+            "Provide either loc or label. "
+            "If the window under the point runs at a higher integrity level than the server (e.g. an app started as administrator), the call fails with PERM_DENIED and sends nothing — UIPI would otherwise block the input silently while reporting success. A successful result means input was dispatched, not that the app acted on it; verify the effect with Snapshot."
         ),
         annotations=ToolAnnotations(
             title="Click",

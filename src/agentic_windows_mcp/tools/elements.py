@@ -45,7 +45,7 @@ def _stale(e: StaleRefError) -> ValueError:
 def register(mcp, *, get_desktop, get_analytics):
     @mcp.tool(
         name="Invoke",
-        description="Invoke a UI element by its Snapshot ref (e.g. '@e12') using the UIA InvokePattern — the pattern behind buttons, menu items and links. Unlike Click it uses no coordinates, so it still lands if the window moved after the snapshot. Pass snapshot=<Snapshot ID> to guard against acting on a superseded snapshot. Returns STALE_REF when the element is gone or changed (take a new Snapshot), and UNSUPPORTED_PATTERN when the element has no InvokePattern (fall back to Click).",
+        description="Invoke a UI element by its Snapshot ref (e.g. '@e12') using the UIA InvokePattern — the pattern behind buttons, menu items and links. Unlike Click it uses no coordinates, so it still lands if the window moved after the snapshot. Pass snapshot=<Snapshot ID> to guard against acting on a superseded snapshot. Returns STALE_REF when the element is gone or changed (take a new Snapshot), UNSUPPORTED_PATTERN when the element has no InvokePattern (fall back to Click), and PERM_DENIED when the element's process runs at a higher integrity level than the server (run the server elevated to drive it).",
         annotations=ToolAnnotations(
             title="Invoke",
             readOnlyHint=False,

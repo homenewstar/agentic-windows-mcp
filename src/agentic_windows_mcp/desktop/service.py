@@ -18,6 +18,7 @@ from agentic_windows_mcp.desktop.control import get_controller
 from agentic_windows_mcp.desktop import flash_overlay
 from agentic_windows_mcp.infrastructure import safe_get
 from agentic_windows_mcp.desktop import control_overlay
+from agentic_windows_mcp.uia import integrity as uia_integrity
 from urllib.parse import urljoin
 from locale import getpreferredencoding
 from dataclasses import dataclass
@@ -945,6 +946,7 @@ class Desktop:
         owner = get_controller()
         owner.checkpoint_current()
         ref, control = self.resolve_element_ref(label, snapshot)
+        self._check_uipi_control(control, "InvokePattern")
         pattern = control.GetPattern(uia.PatternId.InvokePattern)
         if pattern is None:
             raise ValueError(
@@ -963,6 +965,7 @@ class Desktop:
         owner = get_controller()
         owner.checkpoint_current()
         ref, control = self.resolve_element_ref(label, snapshot)
+        self._check_uipi_control(control, "ValuePattern")
         pattern = control.GetPattern(uia.PatternId.ValuePattern)
         legacy = None
         if pattern is None:
@@ -987,6 +990,7 @@ class Desktop:
         owner = get_controller()
         owner.checkpoint_current()
         ref, control = self.resolve_element_ref(label, snapshot)
+        self._check_uipi_control(control, "TogglePattern")
         pattern = control.GetPattern(uia.PatternId.TogglePattern)
         if pattern is None:
             raise ValueError(
@@ -1026,6 +1030,37 @@ class Desktop:
                 f"x={left}..{right}, y={top}..{bottom}"
             )
 
+    # ---- UIPI pre-check (issue #14, findings W-002) ----
+    # SendInput reports success even when UIPI blocks delivery to a
+    # higher-integrity window, so every input path first proves the target
+    # process does not outrank this server. Resolution failures (no window
+    # at the point, an unreadable pid) never block by themselves: only the
+    # integrity comparison inside check_target_process can deny, and it
+    # raises UipiBlockedError outside these try blocks.
+
+    def _check_uipi_point(self, x: int, y: int, action: str) -> None:
+        try:
+            hwnd = win32gui.WindowFromPoint((x, y))
+            if not hwnd:
+                return
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return
+        uia_integrity.check_target_process(pid, action)
+
+    def _check_uipi_foreground(self, action: str) -> None:
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                return
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return
+        uia_integrity.check_target_process(pid, action)
+
+    def _check_uipi_control(self, control, action: str) -> None:
+        uia_integrity.check_target_process(getattr(control, "ProcessId", None), action)
+
     def click(self, loc: tuple[int, int] | list[int], button: str = "left", clicks: int = 1):
         owner = get_controller()
         owner.checkpoint_current()
@@ -1038,6 +1073,7 @@ class Desktop:
             owner.checkpoint_current()
             uia.SetCursorPos(x, y)
             return
+        self._check_uipi_point(x, y, "Click")
         match button:
             case "left":
                 if clicks >= 2:
@@ -1095,6 +1131,7 @@ class Desktop:
         owner.checkpoint_current()
         x, y = loc
         self._validate_screen_point(x, y)
+        self._check_uipi_point(x, y, "Type")
         uia.Click(x, y)
         owner.record_step_current()
         if caret_position == "start":
@@ -1209,6 +1246,11 @@ class Desktop:
         owner = get_controller()
         owner.checkpoint_current()
         if loc:
+            self._check_uipi_point(loc[0], loc[1], "Scroll")
+        else:
+            cx, cy = uia.GetCursorPos()
+            self._check_uipi_point(cx, cy, "Scroll")
+        if loc:
             self.move(loc)
         match type:
             case "vertical":
@@ -1304,6 +1346,8 @@ class Desktop:
             cx, cy = uia.GetCursorPos()
         else:
             cx, cy = normalized_from_loc
+        self._check_uipi_point(cx, cy, "Drag")
+        self._check_uipi_point(x, y, "Drag")
         try:
             owner.input_ledger.press(
                 "mouse:left",
@@ -1347,6 +1391,7 @@ class Desktop:
         sendkeys_str = _shortcut_to_sendkeys(shortcut)
         owner = get_controller()
         owner.checkpoint_current()
+        self._check_uipi_foreground("Shortcut")
         uia.SendKeys(sendkeys_str, interval=0.01)
         owner.record_step_current()
 
@@ -1359,6 +1404,8 @@ class Desktop:
         # Validate every point before Ctrl goes down, so bad input fails without
         # touching the keyboard (and without clicking half of the list).
         points = [self._normalize_drag_point(loc, f"locs[{i}]") for i, loc in enumerate(locs)]
+        for px, py in points:
+            self._check_uipi_point(px, py, "MultiSelect")
         try:
             if press_ctrl:
                 owner.input_ledger.press(

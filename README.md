@@ -344,6 +344,10 @@ Follow this project on **[Trendshift](https://trendshift.io)** — the platform 
 
 Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first. In short: work happens on the `main` branch, and the test suite must pass (`uv run pytest`) before a change lands. Before changing a role/pattern mapping or an input/encoding assumption, check the measured-behaviour ledger in [`probes/windows/FINDINGS.md`](probes/windows/FINDINGS.md).
 
+## ⚖️ Integrity levels (UIPI)
+
+Windows blocks input from a lower-integrity process to a higher-integrity window (e.g. an app running as administrator) — and `SendInput` reports success anyway, so the injection count is never proof of delivery (findings ledger W-002 in `probes/windows/FINDINGS.md`). Before sending physical input or a UIA pattern write, the server compares token integrity levels and fails closed with a `PERM_DENIED` error when the target process outranks it, sending nothing. To drive an elevated app, run the server itself elevated to the same level. Observation (Snapshot, screenshots) of elevated windows is unaffected.
+
 ## 🔒 Security
 
 This server can perform real, irreversible actions on the machine it runs on. Read [SECURITY.md](SECURITY.md) before deploying, and report vulnerabilities privately via [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new) — never as a public issue.

@@ -77,7 +77,8 @@ def test_multiselect_uses_bulk_coordinate_resolution():
     tools = register_tools(desktop)
     result = asyncio.run(tools["MultiSelect"](labels=[0, 1], press_ctrl=False))
 
-    assert result == "Multi-selected elements at:\n(10,10)\n(40,40)"
+    assert result.startswith("Multi-selected elements at:\n(10,10)\n(40,40)")
+    assert result.endswith("[disposition delivery=delivered_unverified retry=unsafe]")
     desktop.get_coordinates_from_labels.assert_called_once_with([0, 1])
     desktop.multi_select.assert_called_once_with(False, [[10, 10], [40, 40]])
 
@@ -90,6 +91,7 @@ def test_multiedit_uses_bulk_coordinate_resolution():
     tools = register_tools(desktop)
     result = asyncio.run(tools["MultiEdit"](labels=[[0, "First"], [1, "Second"]]))
 
-    assert result == "Multi-edited elements at: (10,10) with text 'First', (40,40) with text 'Second'"
+    assert result.startswith("Multi-edited elements at: (10,10) with text 'First', (40,40) with text 'Second'")
+    assert result.endswith("[disposition delivery=delivered_unverified retry=unsafe]")
     desktop.get_coordinates_from_labels.assert_called_once_with([0, 1])
     desktop.multi_edit.assert_called_once_with([[10, 10, "First"], [40, 40, "Second"]])

@@ -1735,6 +1735,47 @@ class Desktop:
                 )
             sleep(self._ACTIONABILITY_POLL)
 
+    def await_label_click_target(
+        self, label: int, wait_timeout: float = 3.0
+    ) -> tuple[int, int] | None:
+        """Auto-wait for the element behind a Click label (#27).
+
+        Click-by-label used to dispatch at the snapshot coordinates the
+        moment it was called, so a button that enabled a second after
+        the snapshot was clicked while still disabled and the click was
+        lost. This runs the #16 battery against the label's live element
+        first and returns the element's *live* centre once it is
+        actionable. Returns None when the battery cannot apply — the
+        label is not in the current ref registry (e.g. a scrollable @s
+        label) or the element carries no re-acquirable UIA identity —
+        and the caller falls back to the snapshot coordinates, exactly
+        the pre-#27 behaviour. Stale and ambiguous refs are terminal and
+        raise from the strict resolver (#12): clicking the old
+        coordinates of an element that is gone or no longer unique is
+        the blind click #12 exists to prevent. ``wait_timeout=0`` skips
+        the battery entirely (single-shot, pre-#27 semantics).
+        """
+        try:
+            budget = float(wait_timeout)
+        except (TypeError, ValueError):
+            raise ValueError("wait_timeout must be a number of seconds") from None
+        if budget < 0 or budget > 30:
+            raise ValueError("wait_timeout must be between 0 and 30 seconds")
+        if budget == 0:
+            return None
+        refs = getattr(self, "_element_refs", None) or {}
+        ref = refs.get(label)
+        if ref is None:
+            return None
+        if (ref.runtime_id is None and not ref.automation_id) or not ref.window_handle:
+            return None
+        ref, control = self.resolve_element_ref(label, None)
+        self._await_actionable(ref, control, timeout=budget)
+        rect = _rect_tuple(control)
+        if rect is None:
+            return None
+        return ((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
+
     def invoke_element(self, label: int, snapshot: int | None = None, wait_timeout: float = 3.0) -> ElementRef:
         owner = get_controller()
         owner.checkpoint_current()

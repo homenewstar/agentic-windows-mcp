@@ -284,6 +284,7 @@ def register(
             "Supports button types: 'left' for selection/activation, 'right' for context menus, 'middle'. "
             "Supports clicks: 0=hover only (no click), 1=single click (select/focus), 2=double click (open/activate). "
             "Provide either loc or label. "
+            "When label is given, it first waits up to wait_timeout seconds (default 3) for the element to become visible, enabled and stable, then clicks the element's live position; a permanently unready element fails with ACTIONABILITY_TIMEOUT naming the check that never passed, and a stale or ambiguous label fails instead of blind-clicking its old coordinates. wait_timeout=0 clicks the snapshot coordinates immediately. "
             "If the window under the point runs at a higher integrity level than the server (e.g. an app started as administrator), the call fails with PERM_DENIED and sends nothing — UIPI would otherwise block the input silently while reporting success. A successful result means input was dispatched, not that the app acted on it; verify the effect with Snapshot."
         ),
         annotations=ToolAnnotations(
@@ -301,6 +302,7 @@ def register(
         label: int | None = None,
         button: Literal["left", "right", "middle"] = "left",
         clicks: int = 1,
+        wait_timeout: float = 3.0,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -308,7 +310,11 @@ def register(
         if loc is None and label is None:
             raise ValueError("Either loc or label must be provided.")
         if label is not None:
-            loc = _resolve_label(desktop, label)
+            # #27: run the actionability battery against the label's live
+            # element and click its live centre; None means the battery
+            # cannot apply to this label, so use the snapshot coordinates.
+            live = desktop.await_label_click_target(label, wait_timeout)
+            loc = list(live) if live is not None else _resolve_label(desktop, label)
         if len(loc) != 2:
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]

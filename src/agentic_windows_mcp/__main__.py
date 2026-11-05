@@ -402,7 +402,10 @@ def _build_mcp() -> FastMCP:
         try:
             if controller.enabled:
                 control_overlay.start()
-                controller.set_health_probe(control_overlay.is_healthy)
+                controller.set_health_probe(
+                    control_overlay.is_healthy,
+                    detail=control_overlay.health_detail,
+                )
             controller.start()
             # The browser consent-dialog monitor hands input back to the
             # user while Chrome's "Allow remote debugging?" dialog is up,

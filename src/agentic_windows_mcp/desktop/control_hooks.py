@@ -39,7 +39,13 @@ def physical_mouse(owner: Any, code: int, wparam: int, lparam: int) -> int:
         if owner._suppress and not owner._emergency:
             if time.monotonic() <= owner._deadline:
                 return 1
-            owner._fail_open(site="hook.mouse_deadline")
+            owner._fail_open(
+                site="hook.mouse_deadline",
+                detail=(
+                    "suppression deadline expired "
+                    f"{time.monotonic() - owner._deadline:.3f}s before the event"
+                ),
+            )
     except Exception as exc:
         owner._fail_open(site="hook.mouse_exception", error=exc)
     result = _user32.CallNextHookEx(owner._mouse_hook, code, wparam, lparam)
@@ -99,7 +105,13 @@ def physical_key(owner: Any, code: int, wparam: int, lparam: int) -> int:
         if owner._suppress and not owner._emergency:
             if time.monotonic() <= owner._deadline:
                 return 1
-            owner._fail_open(site="hook.key_deadline")
+            owner._fail_open(
+                site="hook.key_deadline",
+                detail=(
+                    "suppression deadline expired "
+                    f"{time.monotonic() - owner._deadline:.3f}s before the event"
+                ),
+            )
     except Exception as exc:
         owner._fail_open(site="hook.key_exception", error=exc)
     result = _user32.CallNextHookEx(owner._key_hook, code, wparam, lparam)

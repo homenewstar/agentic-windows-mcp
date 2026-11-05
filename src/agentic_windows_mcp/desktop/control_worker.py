@@ -22,7 +22,10 @@ def refresh_deadline(owner: Any, now: float, fault=None) -> None:
         )
 
     if not owner._lock.acquire(blocking=False):
-        owner._fail_open(site="refresh_deadline.lock_busy")
+        owner._fail_open(
+            site="refresh_deadline.lock_busy",
+            detail="coordinator lock held by another thread",
+        )
         return
     try:
         if current() and owner._state == "ai" and owner._visual_armed and not owner._fast_takeover:
@@ -70,11 +73,11 @@ def run_control_worker(owner: Any, interactive_desktop: Callable[[], bool]) -> N
             if time.monotonic() < next_health:
                 continue
             try:
-                healthy = (
-                    owner._health_probe is None or owner._health_probe()
-                ) and interactive_desktop()
+                probe_ok = owner._health_probe is None or owner._health_probe()
+                interactive = interactive_desktop()
             finally:
                 next_health = time.monotonic() + 0.25
+            healthy = probe_ok and interactive
             now = time.monotonic()
             if (
                 not healthy
@@ -82,7 +85,30 @@ def run_control_worker(owner: Any, interactive_desktop: Callable[[], bool]) -> N
                 or not owner._thread.is_alive()
                 or now - owner._thread_beat > 1.0
             ):
-                owner._fail_open(site="worker.health_check")
+                # Issue #26: this site fired live with error null twice —
+                # it is a condition fault, so record the measured
+                # conditions (and the probe's own explanation, which can
+                # carry the exception the overlay thread stored) instead
+                # of a bare site name.
+                reasons: list[str] = []
+                if not probe_ok:
+                    probe_detail = getattr(owner, "_probe_detail", None)
+                    reasons.append(
+                        (probe_detail() if callable(probe_detail) else None)
+                        or "health probe reported unhealthy"
+                    )
+                if not interactive:
+                    reasons.append("desktop not interactive")
+                if not owner._thread:
+                    reasons.append("monitor thread missing")
+                elif not owner._thread.is_alive():
+                    reasons.append("monitor thread not alive")
+                beat_age = now - owner._thread_beat
+                if beat_age > 1.0:
+                    reasons.append(f"monitor beat stale ({beat_age:.1f}s old)")
+                owner._fail_open(
+                    site="worker.health_check", detail="; ".join(reasons)
+                )
                 owner._mark_unavailable()
                 continue
             if owner._emergency and can_recover:

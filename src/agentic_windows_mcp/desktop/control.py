@@ -78,6 +78,7 @@ class ControlCoordinator:
         self._listeners: list[Callable[[dict], None]] = []
         self.input_ledger = InputLedger()
         self._health_probe: Callable[[], bool] | None = None
+        self._health_detail: Callable[[], str | None] | None = None
         self._begin_notification = threading.local()
         self._visual_armed = False
         self._visual_paused = False
@@ -147,9 +148,29 @@ class ControlCoordinator:
         with self._lock:
             self._listeners.append(callback)
 
-    def set_health_probe(self, probe: Callable[[], bool]) -> None:
-        """Require the visual indicator to stay alive during AI control."""
+    def set_health_probe(
+        self,
+        probe: Callable[[], bool],
+        detail: Callable[[], str | None] | None = None,
+    ) -> None:
+        """Require the visual indicator to stay alive during AI control.
+
+        ``detail`` (issue #26) optionally explains a False probe result
+        in words — including any exception the probed component stored —
+        so a fail-open on the probe can record the reason, not just the
+        site.
+        """
         self._health_probe = probe
+        self._health_detail = detail
+
+    def _probe_detail(self) -> str | None:
+        """The health probe's own explanation, when it provides one."""
+        if self._health_detail is None:
+            return None
+        try:
+            return self._health_detail()
+        except Exception:
+            return None
 
     def visible_ack_required(self) -> bool:
         """Only a new MCP lease must wait for its visual acknowledgement."""
@@ -197,7 +218,13 @@ class ControlCoordinator:
         if generation is None:
             return
         if not restored or (self._health_probe is not None and not self._health_probe()):
-            self._fail_open(site="resume_after_capture.health")
+            detail = (
+                "indicator was not restored after capture"
+                if not restored
+                else self._probe_detail()
+                or "health probe reported unhealthy"
+            )
+            self._fail_open(site="resume_after_capture.health", detail=detail)
             return
         with self._lock:
             if generation == self._generation:
@@ -755,22 +782,35 @@ class ControlCoordinator:
         self._quarantine.clear()
         self._thread = self._watchdog = None
 
-    def _fail_open(self, site: str = "unknown", error: BaseException | None = None) -> None:
+    def _fail_open(
+        self,
+        site: str = "unknown",
+        error: BaseException | None = None,
+        detail: str | None = None,
+    ) -> None:
         # Issue #25: record the fault before latching — which call site
         # fired and the exception summary when the caller has one — so
         # the latch is diagnosable from ControlStatus (health.last_fault)
         # instead of only ever presenting as an anonymous emergency.
-        # Plain attribute writes only, ahead of the existing body: hook
-        # callbacks reach this via _queue and must never wait on a lock.
+        # Issue #26: condition faults have no exception to pass (a stale
+        # heartbeat, an expired deadline, a dead thread); those callers
+        # pass ``detail`` with the measured condition instead, so no
+        # fail-open path records a bare site with error null and no
+        # reason. Plain attribute writes only, ahead of the existing
+        # body: hook callbacks reach this via _queue and must never wait
+        # on a lock.
         self._last_fault = {
             "site": site,
             "error": f"{type(error).__name__}: {error}" if error is not None else None,
+            "detail": detail,
             "at_monotonic": round(time.monotonic(), 1),
         }
         logger.error(
             "Control channel fail-open (site=%s): %s",
             site,
-            self._last_fault["error"] or "no exception supplied",
+            self._last_fault["error"]
+            or self._last_fault["detail"]
+            or "no exception supplied",
         )
         self._fault_token = object()  # Invalidate any older successful hook installation.
         self._suppress = False

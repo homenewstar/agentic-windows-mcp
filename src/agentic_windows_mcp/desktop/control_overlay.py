@@ -479,6 +479,34 @@ def is_healthy() -> bool:
     )
 
 
+def health_detail() -> str | None:
+    """Why is_healthy() is False, or None when healthy (issue #26).
+
+    is_healthy() reduces the indicator's state to a bool; in particular
+    the exception the display thread caught (``indicator.error``) was
+    invisible to the coordinator, so a latch tripped by this probe
+    recorded ``error: null``. This companion names the exact failing
+    condition — and the stored exception — for health.last_fault.
+    """
+    with _lock:
+        indicator = _instance
+    if indicator is None:
+        return "indicator not started"
+    if indicator.error is not None:
+        return (
+            f"indicator error: {type(indicator.error).__name__}: "
+            f"{indicator.error}"
+        )
+    if not indicator.thread.is_alive():
+        return "indicator thread not alive"
+    if indicator.stopping:
+        return "indicator stopping"
+    age = time.monotonic() - indicator.heartbeat
+    if not 0 <= age <= 1.0:
+        return f"indicator heartbeat stale ({age:.1f}s old)"
+    return None
+
+
 @contextmanager
 def suspend_for_capture():
     """Serialize captures and wait for the indicator to disappear first."""

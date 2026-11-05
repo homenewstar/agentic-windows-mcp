@@ -24,7 +24,11 @@
 - `last_fault` — the most recent fail-open fault: `site` (which call
   site failed open), `error` (exception type and message), `at`
   (monotonic timestamp). This is the first place to look after any
-  spontaneous latch.
+  spontaneous latch. Condition faults — a stale heartbeat, an expired
+  deadline, a dead thread — have no exception; for those, `detail`
+  names the measured condition that failed (including any exception
+  the component itself stored, e.g. the indicator's), so a fault with
+  `error: null` still says why it fired.
 - `recovery_events` — the audit trail of in-process recoveries and
   escalations, newest last.
 - `escalation_armed` / `escalation_pending` — whether repeated failed

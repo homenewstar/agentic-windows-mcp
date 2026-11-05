@@ -30,7 +30,7 @@ def register(mcp, *, get_desktop, get_analytics):
     global state_tool, screenshot_tool
     @mcp.tool(
         name='Snapshot',
-        description="Take a screenshot and inspect the screen. Keywords: screenshot, screen capture, see screen, observe, look, inspect, UI elements, what's on screen. Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot with cursor highlight. Set use_annotation=False to get a clean screenshot without bounding box overlays on UI elements (default: True, draws colored rectangles around detected elements). Set use_ui_tree=False for a faster screenshot-only snapshot when you do not need interactive or scrollable element extraction. Set width_reference_lines/height_reference_lines to overlay a grid for better spatial reasoning (make sure vision is enabled to use it). Set use_dom=True for browser content to get web page elements instead of browser UI. Set display=[0] or display=[0,1] using zero-based active Windows display indices; omit it to keep the default full-desktop behavior. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture and inspect only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Dense windows are captured up to an element limit (500 by default): set offset/limit to page through the full interactive element list — the response then includes an 'Interactive Elements Page' section with each element's global index (the same numbering label-based tools accept), the total captured count, and the next offset when more remain. Scope the capture with window=<handle> or window='<title or process name>' to capture only one window's tree and refs (an ambiguous name returns the candidate handles instead of guessing). Re-observe a single element's subtree with root_ref='@e12': the drill-down capture extends the current snapshot's refs — same Snapshot ID, existing refs keep their labels, new elements append — instead of replacing them. Every capture reports 'Capture Completeness': when the element budget cuts the walk the capture is marked PARTIAL and each cut node is marked [truncated] with its child count, so 'children not shown' is never mistaken for 'no children'. Always call this first to understand the current desktop state before taking actions.",
+        description="Take a screenshot and inspect the screen. Keywords: screenshot, screen capture, see screen, observe, look, inspect, UI elements, what's on screen. Captures complete desktop state including: system language, focused/opened windows, interactive elements (buttons, text fields, links, menus with coordinates), and scrollable areas. Set use_vision=True to include screenshot with cursor highlight. Set use_annotation=False to get a clean screenshot without bounding box overlays on UI elements (default: True, draws colored rectangles around detected elements). Set use_ui_tree=False for a faster screenshot-only snapshot when you do not need interactive or scrollable element extraction. Set width_reference_lines/height_reference_lines to overlay a grid for better spatial reasoning (make sure vision is enabled to use it). Set use_dom=True for browser content to get web page elements instead of browser UI. Set display=[0] or display=[0,1] using zero-based active Windows display indices; omit it to keep the default full-desktop behavior. Set region=[left, top, right, bottom] in virtual-desktop pixel coordinates to capture and inspect only that rectangle instead of the whole screen/display — useful when you already know which area matters and want to save tokens; region takes precedence over display when both are given, and an invalid or out-of-bounds region raises an error rather than silently capturing something else. Dense windows are captured up to an element limit (500 by default): set offset/limit to page through the full interactive element list — the response then includes an 'Interactive Elements Page' section with each element's global index (the same numbering label-based tools accept), the total captured count, and the next offset when more remain. Scope the capture with window=<handle> or window='<title or process name>' to capture only one window's tree and refs (an ambiguous name returns the candidate handles instead of guessing); a window-scoped capture also crops the screenshot to the window's bounds by default — set crop_to_window=False to keep the full screen. Re-observe a single element's subtree with root_ref='@e12': the drill-down capture extends the current snapshot's refs — same Snapshot ID, existing refs keep their labels, new elements append — instead of replacing them. Every capture reports 'Capture Completeness': when the element budget cuts the walk the capture is marked PARTIAL and each cut node is marked [truncated] with its child count, so 'children not shown' is never mistaken for 'no children'. Always call this first to understand the current desktop state before taking actions.",
         annotations=ToolAnnotations(
             title="Snapshot",
             readOnlyHint=True,
@@ -53,6 +53,7 @@ def register(mcp, *, get_desktop, get_analytics):
         limit: int | None = None,
         window: int | str | None = None,
         root_ref: str | int | None = None,
+        crop_to_window: bool | str = True,
         ctx: Context = None,
     ):
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
@@ -66,8 +67,9 @@ def register(mcp, *, get_desktop, get_analytics):
         # Window scope (#18): an int is a window handle; a string is
         # resolved against window titles and process names, and an
         # ambiguous string returns the candidate list instead of
-        # guessing. The screenshot still covers the screen as usual —
-        # the scope restricts the captured tree and its refs.
+        # guessing. The scope restricts the captured tree and its refs;
+        # since #28 the screenshot is also cropped to the window's
+        # bounds by default (see below).
         window_handle = None
         if isinstance(window, bool):
             raise ValueError(
@@ -130,6 +132,26 @@ def register(mcp, *, get_desktop, get_analytics):
                 f"Scope: window handle {window_handle} only — the tree "
                 "and refs below cover that window alone."
             )
+        # Screenshot crop (#28): a window-scoped capture crops the
+        # screenshot to the window's bounds by default, through the
+        # existing region machinery. An explicit region or display
+        # always wins, crop_to_window=False keeps the full screen, and
+        # unusable bounds (window gone or minimised) quietly fall back
+        # to the full screen rather than failing the capture.
+        effective_region = _as_region(region)
+        if (
+            window_handle is not None
+            and effective_region is None
+            and display is None
+            and _as_bool(crop_to_window)
+        ):
+            bounds = get_desktop().get_window_bounds(window_handle)
+            if bounds is not None:
+                effective_region = list(bounds)
+                capture_note += (
+                    " The screenshot is cropped to the window's bounds; "
+                    "pass crop_to_window=False for the full screen."
+                )
         try:
             capture_result = capture_desktop_state(
                 get_desktop(),
@@ -140,7 +162,7 @@ def register(mcp, *, get_desktop, get_analytics):
                 width_reference_line=width_reference_line,
                 height_reference_line=height_reference_line,
                 display=display,
-                region=_as_region(region),
+                region=effective_region,
                 tool_name="Snapshot tool",
                 element_offset=offset,
                 element_limit=limit,

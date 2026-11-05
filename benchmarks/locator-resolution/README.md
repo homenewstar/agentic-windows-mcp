@@ -19,3 +19,9 @@ Run it before and after resolver changes and record the numbers (machine +
 commit) in `probes/windows/FINDINGS.md` or the change's PR. CI runs the small
 scenario set via `tests/test_locator_benchmark.py` but does not gate on the
 timings.
+
+The harness also prints a **wrapper-descent measurement** (issue #28): a
+Chromium-like tree where every semantic node sits under a chain of anonymous
+wrappers, reporting the wrapper share of all walk visits and the
+full-descent identity-count time per wrapper depth. The keep/skip decision
+it backs lives in `probes/windows/FINDINGS.md` row W-007.

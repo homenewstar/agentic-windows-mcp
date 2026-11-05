@@ -445,8 +445,10 @@ def register(mcp, *, get_desktop, get_analytics):
     @mcp.tool(
         name="Browser_GetAccessibilityTree",
         description=(
-            "Read the page's full accessibility tree via CDP Accessibility.getFullAXTree "
-            "(roles, accessible names, values and state properties), like the DevTools Accessibility panel."
+            "Read the page's accessibility tree via CDP Accessibility.getFullAXTree "
+            "(roles, accessible names, values and state properties), like the DevTools Accessibility panel. "
+            "Every node carries its node_id. Pass root_node_id=<a node_id from a previous call> to drill down: "
+            "the same capture re-rooted at that node, returning only its subtree \u2014 the browser counterpart of Snapshot's root_ref."
         ),
         annotations=ToolAnnotations(
             title="Browser Get Accessibility Tree",
@@ -459,8 +461,11 @@ def register(mcp, *, get_desktop, get_analytics):
     async def browser_get_accessibility_tree(
         max_depth: int = 30,
         page_id: Optional[int] = None,
+        root_node_id: Optional[int] = None,
     ) -> str:
-        res = await manager.get_accessibility_tree(max_depth=max_depth, page_id=page_id)
+        res = await manager.get_accessibility_tree(
+            max_depth=max_depth, page_id=page_id, root_node_id=root_node_id
+        )
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     @mcp.tool(

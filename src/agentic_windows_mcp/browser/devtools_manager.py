@@ -1650,7 +1650,10 @@ class BrowserDevToolsManager:
         }
 
     async def _get_accessibility_tree_internal(
-        self, max_depth: int = 30, page_id: Optional[int] = None
+        self,
+        max_depth: int = 30,
+        page_id: Optional[int] = None,
+        root_node_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
         session, _tracker = await self._get_cdp(page)
@@ -1667,6 +1670,7 @@ class BrowserDevToolsManager:
         def build(node: Dict[str, Any], depth: int, seen: set) -> Dict[str, Any]:
             node_id = node.get("nodeId")
             item: Dict[str, Any] = {
+                "node_id": node_id,
                 "role": ax_value(node.get("role")),
                 "name": ax_value(node.get("name")),
                 "ignored": bool(node.get("ignored")),
@@ -1690,11 +1694,25 @@ class BrowserDevToolsManager:
             return item
 
         root = next((n for n in nodes if not n.get("parentId")), None)
-        return {
-            "url": page.url,
-            "node_count": len(nodes),
-            "tree": build(root, 0, {root.get("nodeId")}) if root else None,
-        }
+        result: Dict[str, Any] = {"url": page.url, "node_count": len(nodes)}
+        if root_node_id is not None:
+            # Drill-down (#28): re-root the same capture at one node, the
+            # browser counterpart of Snapshot's root_ref. The node_id
+            # values are the ones this same method prints on every node,
+            # so a drill always refers to the parent capture's numbering.
+            target = by_id.get(root_node_id)
+            if target is None:
+                raise ValueError(
+                    f"root_node_id {root_node_id} is not part of this page's "
+                    "accessibility tree. Take a fresh "
+                    "Browser_GetAccessibilityTree and pass a node_id it "
+                    "printed."
+                )
+            result["root_node_id"] = root_node_id
+            result["tree"] = build(target, 0, {root_node_id})
+            return result
+        result["tree"] = build(root, 0, {root.get("nodeId")}) if root else None
+        return result
 
     async def _list_page_sources_internal(
         self, filter_text: Optional[str] = None, page_id: Optional[int] = None
@@ -1774,10 +1792,13 @@ class BrowserDevToolsManager:
         )
 
     async def get_accessibility_tree(
-        self, max_depth: int = 30, page_id: Optional[int] = None
+        self,
+        max_depth: int = 30,
+        page_id: Optional[int] = None,
+        root_node_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         return await self._run_in_worker(
-            self._get_accessibility_tree_internal(max_depth, page_id)
+            self._get_accessibility_tree_internal(max_depth, page_id, root_node_id)
         )
 
     async def list_page_sources(

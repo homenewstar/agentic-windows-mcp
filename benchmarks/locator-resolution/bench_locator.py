@@ -136,6 +136,74 @@ def scenarios(size):
     yield ("value-mutated", mut_root, ident, "resolved")
 
 
+WRAPPER_ROLES = ("group", "custom", "pane")
+
+
+def build_wrapped_tree(target_semantic, wrapper_depth, seed):
+    """A Chromium-like tree: every semantic node sits under a chain of
+    anonymous wrappers (no name, no automation_id), the way Chromium's
+    UIA provider emits DOM containers. Returns (root, semantic, wrappers).
+    """
+    rng = random.Random(seed)
+    root = {"role": "window", "name": "Bench", "automation_id": "root",
+            "value": "", "children": []}
+    semantic = 0
+    wrappers = 0
+    frontier = [root]
+    while semantic < target_semantic and frontier:
+        nxt = []
+        for parent in frontier:
+            for _ in range(rng.randrange(2, 5)):
+                node = parent
+                for _ in range(wrapper_depth):
+                    wrapper = {"role": rng.choice(WRAPPER_ROLES), "name": "",
+                               "automation_id": "", "value": "", "children": []}
+                    node["children"].append(wrapper)
+                    node = wrapper
+                    wrappers += 1
+                leaf = make_node(rng, 0)
+                node["children"].append(leaf)
+                semantic += 1
+                nxt.append(leaf)
+                if semantic >= target_semantic:
+                    break
+            if semantic >= target_semantic:
+                break
+        frontier = nxt
+    return root, semantic, wrappers
+
+
+def wrapper_measurement(semantic=2000, depths=(0, 2, 4, 6), repeats=15):
+    """How much of a Chromium-like tree is anonymous-wrapper descent?
+
+    Reports, per wrapper depth, the total node count, the wrapper share
+    of all walk visits, and the full-descent identity-count time. The
+    classification must stay "resolved": wrappers share one identity
+    (role, "", "") among themselves but never collide with a semantic
+    target's. This is the measurement behind the keep/skip decision in
+    probes/windows/FINDINGS.md (issue #28).
+    """
+    rows = []
+    for depth in depths:
+        root, sem, wrappers = build_wrapped_tree(semantic, depth, seed=5000 + depth)
+        total = sum(1 for _ in walk(root))
+        target = pick_unique_target(root, random.Random(42))
+        ident = identity_of(target)
+        times = []
+        got = None
+        for _ in range(repeats):
+            start = time.perf_counter()
+            got = classify(root, ident)
+            times.append((time.perf_counter() - start) * 1000.0)
+        rows.append({
+            "semantic": sem, "wrapper_depth": depth, "nodes": total,
+            "wrapper_nodes": wrappers,
+            "wrapper_share_pct": round(100.0 * wrappers / total, 1),
+            "classify": got, "median_ms": round(statistics.median(times), 3),
+        })
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sizes", default="500,2000,8000")
@@ -160,6 +228,18 @@ def main():
                             "got": got, "ok": ok, "median_ms": round(median, 3)})
             print(f"{size:>6} {name:<16} {expected:<10} {got:<10} {median:>10.3f}")
     print("JSON:", json.dumps(summary))
+
+    print(f"\n{'semantic':>8} {'wrapdepth':>9} {'nodes':>7} {'wrappers':>8} "
+          f"{'share':>6} {'classify':<10} {'median ms':>10}")
+    wrapper_rows = wrapper_measurement(repeats=args.repeats)
+    for row in wrapper_rows:
+        ok = row["classify"] == "resolved"
+        failures += 0 if ok else 1
+        print(f"{row['semantic']:>8} {row['wrapper_depth']:>9} {row['nodes']:>7} "
+              f"{row['wrapper_nodes']:>8} {row['wrapper_share_pct']:>5.1f}% "
+              f"{row['classify']:<10} {row['median_ms']:>10.3f}")
+    print("WRAPPERS_JSON:", json.dumps(wrapper_rows))
+
     if failures:
         print(f"FAIL: {failures} scenario(s) misclassified")
         return 1

@@ -1257,6 +1257,27 @@ class Desktop:
             results.append((element_node.center.x, element_node.center.y))
         return results
 
+    def get_window_bounds(self, handle: int) -> tuple[int, int, int, int] | None:
+        """Live (left, top, right, bottom) of a top-level window, or None.
+
+        None when the window is gone, reports no area, or is minimised —
+        Windows reports a -32000 sentinel rectangle for minimised
+        windows, which is not a place a screenshot can be cropped to.
+        Used by Snapshot's window-scope screenshot crop (#28).
+        """
+        root = uia.ControlFromHandle(handle)
+        if root is None:
+            return None
+        rect = _rect_tuple(root)
+        if rect is None:
+            return None
+        left, top, right, bottom = rect
+        if right <= left or bottom <= top:
+            return None
+        if left <= -31000 or top <= -31000:
+            return None
+        return rect
+
     def find_window_candidates(self, query: str) -> list[dict]:
         """Top-level windows matching a title substring or process name (#18).
 

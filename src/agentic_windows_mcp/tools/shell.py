@@ -2,6 +2,7 @@
 
 from mcp.types import ToolAnnotations
 from agentic_windows_mcp.infrastructure import with_analytics
+from agentic_windows_mcp.infrastructure.errors import with_disposition
 from agentic_windows_mcp.powershell import PowerShellExecutor
 from agentic_windows_mcp.powershell.jobs import JOBS
 from fastmcp import Context
@@ -37,6 +38,7 @@ def register(mcp, *, get_desktop, get_analytics):
         ),
     )
     @with_analytics(get_analytics(), "Powershell-Tool")
+    @with_disposition
     def powershell_tool(
         command: str,
         timeout: int = 30,

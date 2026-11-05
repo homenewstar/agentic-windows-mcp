@@ -192,4 +192,9 @@ class TestTypeToolVerify:
     def test_without_verify_the_message_is_unchanged(self):
         fake = FakeDesktop()
         message = asyncio.run(_tools(fake)["Type"](text="hello", loc=[100, 100]))
-        assert message == "Typed hello at (100,100)."
+        # The verify feature adds nothing; the #13 disposition suffix that
+        # every action result carries is the only addition.
+        assert message.startswith("Typed hello at (100,100).")
+        assert message.endswith(
+            "[disposition delivery=delivered_unverified retry=unsafe]"
+        )

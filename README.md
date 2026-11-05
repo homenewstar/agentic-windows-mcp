@@ -348,6 +348,17 @@ Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) fir
 
 Windows blocks input from a lower-integrity process to a higher-integrity window (e.g. an app running as administrator) — and `SendInput` reports success anyway, so the injection count is never proof of delivery (findings ledger W-002 in `probes/windows/FINDINGS.md`). Before sending physical input or a UIA pattern write, the server compares token integrity levels and fails closed with a `PERM_DENIED` error when the target process outranks it, sending nothing. To drive an elevated app, run the server itself elevated to the same level. Observation (Snapshot, screenshots) of elevated windows is unaffected.
 
+## 🎯 Action results: delivery & retry dispositions
+
+Every action tool (Click, Type, Scroll, Move, Shortcut, MultiSelect, MultiEdit, Invoke, SetValue, Toggle, PowerShell) ends its result with a machine-readable disposition, and every failure from those tools ends with a typed error envelope:
+
+```
+[disposition delivery=delivered_unverified retry=unsafe]
+[error code=STALE_REF delivery=not_delivered retry=safe recovery=refresh_snapshot_then_retry_original]
+```
+
+`delivery` says whether the input reached the application (`not_delivered`, `delivery_uncertain`, `delivered_unverified`, `delivered_verified`, `unknown`); `retry` is derived from it — **only `not_delivered` is safe to retry**. When a failure reports `retry=unsafe` or `unknown`, do not repeat the action blindly: observe first (Snapshot, ControlStatus), because a repeated click can submit twice and a repeated toggle undoes itself. The human-readable message — including the existing `STALE_REF:` / `PERM_DENIED:` prefixes — stays in front of the envelope; branch on the `code=` token, never on the prose. Read-only tools send no input, so their failures are inherently `not_delivered` / retry-safe.
+
 ## 🔒 Security
 
 This server can perform real, irreversible actions on the machine it runs on. Read [SECURITY.md](SECURITY.md) before deploying, and report vulnerabilities privately via [GitHub Security Advisories](https://github.com/homenewstar/agentic-windows-mcp/security/advisories/new) — never as a public issue.

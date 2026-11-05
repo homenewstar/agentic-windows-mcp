@@ -12,6 +12,7 @@ import psutil
 from mcp.types import ToolAnnotations
 from agentic_windows_mcp.desktop.utils import as_bool as _as_bool
 from agentic_windows_mcp.infrastructure import with_analytics
+from agentic_windows_mcp.infrastructure.errors import with_disposition
 from fastmcp import Context
 
 
@@ -294,6 +295,7 @@ def register(
         ),
     )
     @with_analytics(get_analytics(), "Click-Tool", run_sync_in_thread=False)
+    @with_disposition
     def click_tool(
         loc: list[int] | str | None = None,
         label: int | None = None,
@@ -326,6 +328,7 @@ def register(
         ),
     )
     @with_analytics(get_analytics(), "Type-Tool", run_sync_in_thread=False)
+    @with_disposition
     def type_tool(
         text: str,
         loc: list[int] | str | None = None,
@@ -392,6 +395,7 @@ def register(
         ),
     )
     @with_analytics(get_analytics(), "Scroll-Tool", run_sync_in_thread=False)
+    @with_disposition
     def scroll_tool(
         loc: list[int] | str | None = None,
         label: int | None = None,
@@ -435,6 +439,7 @@ def register(
         ),
     )
     @with_analytics(get_analytics(), "Move-Tool", run_sync_in_thread=False)
+    @with_disposition
     def move_tool(
         loc: list[int] | str | None = None,
         label: int | None = None,
@@ -499,6 +504,7 @@ def register(
         ),
     )
     @with_analytics(get_analytics(), "Shortcut-Tool")
+    @with_disposition
     def shortcut_tool(shortcut: str, ctx: Context = None):
         get_desktop().shortcut(shortcut)
         return f"Pressed {shortcut}."

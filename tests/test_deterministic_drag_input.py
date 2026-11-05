@@ -49,7 +49,8 @@ def test_move_tool_preserves_legacy_move_behavior() -> None:
     desktop = FakeDesktop()
     result = asyncio.run(_tools(desktop)["Move"](loc=[10, 20]))
 
-    assert result == "Moved the mouse pointer to (10,20)."
+    assert result.startswith("Moved the mouse pointer to (10,20).")
+    assert result.endswith("[disposition delivery=delivered_unverified retry=unsafe]")
     assert desktop.move_calls == [[10, 20]]
     assert desktop.drag_calls == []
 
@@ -86,7 +87,8 @@ def test_move_tool_accepts_explicit_drag_start_list() -> None:
         )
     )
 
-    assert result == "Dragged from (10,20) to (100,200) over 0.250 seconds."
+    assert result.startswith("Dragged from (10,20) to (100,200) over 0.250 seconds.")
+    assert result.endswith("[disposition delivery=delivered_unverified retry=unsafe]")
     assert desktop.drag_calls == [
         {
             "loc": [100, 200],
@@ -106,7 +108,8 @@ def test_move_tool_accepts_explicit_drag_start_json_string() -> None:
         )
     )
 
-    assert result == "Dragged from (10,20) to (100,200)."
+    assert result.startswith("Dragged from (10,20) to (100,200).")
+    assert result.endswith("[disposition delivery=delivered_unverified retry=unsafe]")
     assert desktop.drag_calls[0]["from_loc"] == [10, 20]
 
 

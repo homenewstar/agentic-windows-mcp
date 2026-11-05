@@ -14,6 +14,10 @@ import re
 from mcp.types import ToolAnnotations
 from agentic_windows_mcp.desktop.service import StaleRefError
 from agentic_windows_mcp.infrastructure import with_analytics
+from agentic_windows_mcp.infrastructure.errors import (
+    DELIVERED_VERIFIED,
+    with_disposition,
+)
 from fastmcp import Context
 
 _REF_RE = re.compile(r"^@?[es]?(\d+)$", re.IGNORECASE)
@@ -55,6 +59,7 @@ def register(mcp, *, get_desktop, get_analytics):
         ),
     )
     @with_analytics(get_analytics(), "Invoke-Tool", run_sync_in_thread=False)
+    @with_disposition
     def invoke_tool(ref: str | int, snapshot: int | None = None, ctx: Context = None) -> str:
         label = parse_ref(ref)
         try:
@@ -75,6 +80,7 @@ def register(mcp, *, get_desktop, get_analytics):
         ),
     )
     @with_analytics(get_analytics(), "SetValue-Tool", run_sync_in_thread=False)
+    @with_disposition
     def set_value_tool(
         ref: str | int, value: str, snapshot: int | None = None, ctx: Context = None
     ) -> str:
@@ -104,6 +110,7 @@ def register(mcp, *, get_desktop, get_analytics):
         ),
     )
     @with_analytics(get_analytics(), "Toggle-Tool", run_sync_in_thread=False)
+    @with_disposition(success=DELIVERED_VERIFIED)
     def toggle_tool(ref: str | int, snapshot: int | None = None, ctx: Context = None) -> str:
         label = parse_ref(ref)
         try:

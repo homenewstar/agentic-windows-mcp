@@ -7,12 +7,26 @@ from importlib import metadata
 
 import pytest
 
-from agentic_windows_mcp import __main__ as main_module
+from agentic_windows_mcp.tools import guide as guide_tools
 from agentic_windows_mcp.tools.guide import TOPICS, guide_text, server_version
 
 
+class _FakeMCP:
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self, **kwargs):
+        def deco(fn):
+            self.tools[kwargs["name"]] = fn
+            return fn
+
+        return deco
+
+
 def _guide():
-    return main_module.mcp._tool_manager._tools["Guide"].fn
+    mcp = _FakeMCP()
+    guide_tools.register(mcp, get_desktop=lambda: None, get_analytics=lambda: None)
+    return mcp.tools["Guide"]
 
 
 class TestGuideContent:

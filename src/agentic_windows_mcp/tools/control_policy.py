@@ -42,6 +42,7 @@ OTHER = frozenset(
         "Find",
         "Get",
         "Is",
+        "Guide",
         "Screenshot",
         "Scrape",
         "Wait",

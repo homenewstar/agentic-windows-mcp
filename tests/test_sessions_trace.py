@@ -55,7 +55,7 @@ class TestSessionNamespacing:
 
         info = desktop.activate_session("alpha")
         assert info == {"session": "alpha", "created": True, "generation": 0, "refs": 0}
-        assert desktop.refs_generation() == 0
+        assert desktop.refs_generation == 0
         assert desktop._element_refs == {}
 
         with pytest.raises(StaleRefError) as excinfo:
@@ -77,7 +77,7 @@ class TestSessionNamespacing:
 
         assert desktop.end_session() == "alpha"
         assert desktop.active_session_id == "default"
-        assert desktop.refs_generation() == 1
+        assert desktop.refs_generation == 1
         assert desktop._element_refs[0].name == "DefaultBtn"
 
         info = desktop.activate_session("alpha")
@@ -99,7 +99,7 @@ class TestSessionNamespacing:
         desktop._element_refs = {}
         desktop._refs_nodes = {}
         desktop._refs_tree_state = None
-        assert desktop.refs_generation() == 7
+        assert desktop.refs_generation == 7
         assert desktop.active_session_id == "default"
 
 

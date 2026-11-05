@@ -88,6 +88,7 @@ EXPECTED_TOOLS = {
     "Scrape",
     "Screenshot",
     "Scroll",
+    "Session",
     "SetValue",
     "Shortcut",
     "Snapshot",

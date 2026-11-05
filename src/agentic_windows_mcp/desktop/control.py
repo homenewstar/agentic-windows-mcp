@@ -356,6 +356,9 @@ class ControlCoordinator:
         with self._lock:
             self._recovery_events.append(event)
         logger.critical("Control channel recovery escalation: %s", event)
+        from agentic_windows_mcp.infrastructure.trace import record_event
+
+        record_event("recovery_escalation", reason=reason, trigger=trigger)
         handler = self._escalation_handler
         if handler is None:
             logger.critical(
@@ -446,6 +449,14 @@ class ControlCoordinator:
             with self._lock:
                 self._recovery_events.append(event)
             logger.warning("Control channel recovery attempt: %s", event)
+            from agentic_windows_mcp.infrastructure.trace import record_event
+
+            record_event(
+                "recovery_attempt",
+                action=event.get("action"),
+                outcome=event.get("outcome"),
+                trigger=trigger,
+            )
         finally:
             self._recovery_lock.release()
         return True

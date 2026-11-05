@@ -335,6 +335,12 @@ def _build_mcp() -> FastMCP:
 
         watchdog = _start_watchdog(desktop)
 
+        # Issue #20: opt-in JSONL trace (AGENTIC_WINDOWS_MCP_TRACE=1);
+        # init_trace() is a no-op when the flag is unset.
+        from agentic_windows_mcp.infrastructure.trace import init_trace
+
+        init_trace()
+
         # Set thresholds before installing input hooks; invalid TOML was rejected at load.
         controller.mouse_takeover_units = _control_config.mouse_takeover_units
         controller.mouse_takeover_pixels = _control_config.mouse_takeover_pixels
@@ -1037,6 +1043,36 @@ def _register_task_powershell(task_name: str, script_path: str) -> subprocess.Co
         capture_output=True,
         text=True,
     )
+
+
+@main.command("trace-export")
+@click.option(
+    "--dir",
+    "directory",
+    default=None,
+    help="Trace directory (default: <config dir>/traces).",
+)
+def trace_export(directory: str | None) -> None:
+    """Print the merged JSONL trace timeline (#20) for incident analysis.
+
+    Segments from every server process in the directory are merged in
+    timestamp order; unreadable (e.g. truncated tail) lines are counted
+    on stderr instead of failing the export.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    from agentic_windows_mcp.infrastructure.trace import default_trace_dir, read_trace
+
+    records, warnings = read_trace(
+        _Path(directory) if directory else default_trace_dir()
+    )
+    for record in records:
+        click.echo(_json.dumps(record, ensure_ascii=False))
+    if warnings:
+        click.echo(
+            f"warning: skipped {warnings} unreadable trace line(s)", err=True
+        )
 
 
 @main.command()

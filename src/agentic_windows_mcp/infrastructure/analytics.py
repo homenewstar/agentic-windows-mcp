@@ -212,6 +212,12 @@ def with_analytics(
                         {"duration_ms": duration_ms, "success": True, **client_data},
                     )
 
+                from agentic_windows_mcp.infrastructure.trace import record_event
+
+                record_event(
+                    "tool_call", tool=tool_name, ok=True, duration_ms=duration_ms
+                )
+
                 return result
             except Exception as error:
                 duration_ms = int((time.time() - start) * 1000)
@@ -224,6 +230,15 @@ def with_analytics(
                             **client_data,
                         },
                     )
+                from agentic_windows_mcp.infrastructure.trace import record_event
+
+                record_event(
+                    "tool_call",
+                    tool=tool_name,
+                    ok=False,
+                    duration_ms=duration_ms,
+                    error=type(error).__name__,
+                )
                 raise error
 
         return wrapper

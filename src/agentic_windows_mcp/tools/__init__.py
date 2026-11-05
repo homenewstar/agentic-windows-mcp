@@ -17,6 +17,7 @@ from agentic_windows_mcp.tools import (
     query,
     registry,
     scrape,
+    session,
     shell,
     snapshot,
 )
@@ -31,6 +32,7 @@ _MODULES = [
     elements,
     query,
     guide,
+    session,
     batch,
     input,
     scrape,

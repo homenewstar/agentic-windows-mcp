@@ -198,6 +198,24 @@ class AmbiguousRefError(RuntimeError):
     (issue #12) — resolving it would mean guessing, so it is refused."""
 
 
+class _RefMapState:
+    """One session's snapshot ref registry (#20).
+
+    Holds exactly what used to live flat on Desktop: the generation
+    counter, the label -> ElementRef map, the tree state behind the
+    capture, and the label -> node map. Sessions namespace these so
+    refs issued under one session can never resolve under another.
+    """
+
+    __slots__ = ("generation", "refs", "tree_state", "nodes")
+
+    def __init__(self) -> None:
+        self.generation = 0
+        self.refs: dict[int, ElementRef] = {}
+        self.tree_state = None
+        self.nodes: dict[int, object] = {}
+
+
 @dataclass
 class ElementRef:
     """Identity of one snapshot element, captured for later re-acquisition."""
@@ -517,6 +535,101 @@ class Desktop:
         # existing labels while appending new ones, so label order and
         # node-list order can diverge; this map stays authoritative.
         self._refs_nodes: dict[int, object] = {}
+
+    # --- Session-namespaced ref registry (#20) -------------------------
+    # The four registry attributes above are properties backed by the
+    # ACTIVE session's _RefMapState. Single-session behavior is
+    # unchanged; switching sessions swaps which refmap resolves, so a
+    # ref from one session can never resolve inside another. The store
+    # is created lazily in __dict__ so partially-constructed Desktop
+    # objects (test rigs using __new__) behave exactly as before.
+
+    def _refmap_store(self) -> dict[str, _RefMapState]:
+        store = self.__dict__.get("_refmaps")
+        if store is None:
+            store = {"default": _RefMapState()}
+            self.__dict__["_refmaps"] = store
+        return store
+
+    @property
+    def active_session_id(self) -> str:
+        return self.__dict__.get("_session_id", "default")
+
+    @property
+    def _active_refmap(self) -> _RefMapState:
+        return self._refmap_store()[self.active_session_id]
+
+    @property
+    def _refs_generation(self) -> int:
+        return self._active_refmap.generation
+
+    @_refs_generation.setter
+    def _refs_generation(self, value: int) -> None:
+        self._active_refmap.generation = value
+
+    @property
+    def _element_refs(self) -> dict[int, ElementRef]:
+        return self._active_refmap.refs
+
+    @_element_refs.setter
+    def _element_refs(self, value: dict[int, ElementRef]) -> None:
+        self._active_refmap.refs = value
+
+    @property
+    def _refs_tree_state(self):
+        return self._active_refmap.tree_state
+
+    @_refs_tree_state.setter
+    def _refs_tree_state(self, value) -> None:
+        self._active_refmap.tree_state = value
+
+    @property
+    def _refs_nodes(self) -> dict[int, object]:
+        return self._active_refmap.nodes
+
+    @_refs_nodes.setter
+    def _refs_nodes(self, value: dict[int, object]) -> None:
+        self._active_refmap.nodes = value
+
+    def activate_session(self, session_id: str) -> dict:
+        """Make ``session_id`` the active ref namespace, creating it."""
+        from agentic_windows_mcp.infrastructure.sessions import validate_session_id
+
+        session_id = validate_session_id(session_id)
+        store = self._refmap_store()
+        created = session_id not in store
+        if created:
+            store[session_id] = _RefMapState()
+        self.__dict__["_session_id"] = session_id
+        refmap = store[session_id]
+        return {
+            "session": session_id,
+            "created": created,
+            "generation": refmap.generation,
+            "refs": len(refmap.refs),
+        }
+
+    def end_session(self) -> str:
+        """Deactivate the current session; the default namespace resumes.
+
+        The ended session's refmap is kept under its id, so reactivating
+        the session later resumes exactly where it left off.
+        """
+        previous = self.active_session_id
+        self.__dict__["_session_id"] = "default"
+        return previous
+
+    def session_overview(self) -> dict:
+        return {
+            "active": self.active_session_id,
+            "sessions": {
+                session_id: {
+                    "generation": refmap.generation,
+                    "refs": len(refmap.refs),
+                }
+                for session_id, refmap in self._refmap_store().items()
+            },
+        }
 
     def get_state(
         self,
@@ -1244,6 +1357,15 @@ class Desktop:
         self._element_refs = refs
         self._refs_nodes = {label: node for label, node in enumerate(nodes)}
         self._refs_tree_state = tree_state
+        from agentic_windows_mcp.infrastructure.trace import record_event
+
+        record_event(
+            "snapshot_registered",
+            session=self.active_session_id,
+            generation=self._refs_generation,
+            refs=len(refs),
+            extend=extend,
+        )
         return self._refs_generation
 
     def _merged_ref_nodes(self, new_nodes) -> list | None:
@@ -1295,6 +1417,16 @@ class Desktop:
             )
         ref = self._element_refs.get(label)
         if ref is None:
+            # If the label lives in another session's refmap, say so —
+            # the recovery (switch session) differs from a plain stale
+            # ref (re-snapshot) (#20).
+            for other_id, other_map in self._refmap_store().items():
+                if other_id != self.active_session_id and label in other_map.refs:
+                    raise StaleRefError(
+                        f"STALE_REF: @e{label} belongs to session {other_id!r}, "
+                        f"not the active session {self.active_session_id!r}. "
+                        "Switch sessions or take a new Snapshot."
+                    )
             raise StaleRefError(
                 f"STALE_REF: no element with label {label} in snapshot "
                 f"{self._refs_generation}. Take a new Snapshot."

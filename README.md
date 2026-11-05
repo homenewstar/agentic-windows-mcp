@@ -304,14 +304,14 @@ DeepSeek (and other models) connect in two ways:
 
 ---
 
-## 🧰 The toolset (51 tools)
+## 🧰 The toolset (52 tools)
 
 | Group | Tools |
 |---|---|
 | **Desktop control** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
 | **Element refs & queries** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is`, `Batch` |
 | **Apps & system** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
-| **Control gate** | `ControlStatus` (who currently holds control, which policy applies), `Guide` (the bundled, version-matched agent playbook: `core` / `windows` / `operations`) |
+| **Control gate** | `ControlStatus` (who currently holds control, which policy applies), `Guide` (the bundled, version-matched agent playbook: `core` / `windows` / `operations`), `Session` (named ref namespaces) |
 | **Browser (CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **Deep DevTools** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
 
@@ -370,6 +370,18 @@ Sequences that hold physical state — a drag's mouse button, MultiSelect's Ctrl
 - **Ledger-tracked holds** (drag, Ctrl-multi-select): the input ledger records the hold *before* injecting the down, and the sequence releases it in a `finally`. The release never masks the outcome: if the sequence failed, its error propagates; if it completed but the release could not be delivered, the result is a typed `RELEASE_UNCONFIRMED` error (disposition `delivered_unverified`, retry unsafe) instead of a clean-looking success.
 - **Self-guarded primitives**: `SendKeys` records every key before injecting it and sweeps key-ups for anything still pressed when interrupted; the click primitives attempt one corrective up after a failed up, then report `RELEASE_UNCONFIRMED` if even that cannot be delivered.
 - **Backstop**: on gate loss the coordinator releases every ledger hold, and stale-input recovery sweeps holds whose physical state no longer matches. The two layers cannot double-release: a sequence's own release pops its ledger entry, and the ledger re-checks the physical state before injecting an up, so a user's own physical press is never stolen.
+
+## 🗂️ Sessions and the JSONL trace
+
+**Sessions** namespace the snapshot refs. `Session` with `mode='start'` and a session id activates that namespace: Snapshots register into it, and refs from any other session stop resolving (a cross-session attempt fails with a `STALE_REF` that names the owning session, so the recovery is obvious). `mode='end'` returns to the default session; an ended session's refs are kept and resume when it is started again. Each session has a manifest under `~/.agentic-windows-mcp/sessions/<id>/` recording when it was created and ended.
+
+**Trace** (opt-in): with `AGENTIC_WINDOWS_MCP_TRACE=1`, the server appends a JSONL trace under `~/.agentic-windows-mcp/traces/` — one segment per process, first line a meta record (schema version, server version, pid, start time). Events cover tool calls (name, outcome, duration — **never arguments**, so no password value or credential can land in the trace), snapshot registrations, session lifecycle, and gate recovery/escalation actions. The schema evolves additively only. Merge all segments into one deterministic timeline for incident analysis with:
+
+```
+agentic-windows-mcp trace-export [--dir <path>]
+```
+
+Truncated or corrupt tail lines (what a killed process leaves behind) are skipped with a warning count instead of failing the export. Pre/post-action screenshots can be stored beside the trace by the writer when explicitly enabled; no tool enables that today, and such files should be treated as sensitive.
 
 ## 🎯 Action results: delivery & retry dispositions
 

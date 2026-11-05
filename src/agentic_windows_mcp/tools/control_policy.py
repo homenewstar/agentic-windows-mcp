@@ -43,6 +43,7 @@ OTHER = frozenset(
         "Get",
         "Is",
         "Guide",
+        "Session",
         "Screenshot",
         "Scrape",
         "Wait",

@@ -13,7 +13,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-yellow)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-purple)
-![Tools](https://img.shields.io/badge/Tools-40-orange)
+![Tools](https://img.shields.io/badge/Tools-52-orange)
 [![Trendshift](https://img.shields.io/badge/Trendshift-Track%20the%20trend-ff6b35)](https://trendshift.io)
 
 **English** · [Tiếng Việt](README.vi.md) · [한국어](README.ko.md) · [中文](README.zh.md)
@@ -81,12 +81,12 @@ The three pillars are **completely independent geographically**, joined by only 
 
 ### 🖥️ Total desktop control
 - **Mouse & keyboard like a human**: click, double/right-click, multi-point drag paths, press-and-hold, swipe, Unicode text typing, hotkey chords, scrolling — down to pixel precision.
-- **Reads the screen via the UI Automation tree**: a "Snapshot" of every element of the active window (buttons, inputs, labels…) with numbered screenshot annotations — the agent understands UIs **without a vision model**.
+- **Reads the screen via the UI Automation tree**: a "Snapshot" of the UI Automation tree — the whole desktop, or scoped to a single window — with numbered screenshot annotations — the agent understands UIs **without a vision model**.
 - **Window & app management**: launch apps, switch/close/resize windows, multi-monitor, virtual desktops, region screenshots.
 - **Clipboard, notifications, displays**: read/write clipboard, send system notifications, manage screens.
 
 ### ⚙️ System automation
-- **Unrestricted PowerShell**: run commands, install software, administer the system.
+- **Unrestricted PowerShell**: run commands, install software, administer the system — including **background jobs** (`background: true`, then `JobStatus` / `JobOutput` / `JobStop`) for long-running commands that must not block the agent.
 - **FileSystem**: read/write/list/move files & folders — read and edit source code directly.
 - **Registry & Process**: inspect/edit the registry, list & terminate processes.
 - **Scrape**: download and extract web page content.
@@ -102,6 +102,14 @@ The Browser toolset connects to your already-open Chrome/Edge/Brave via **CDP (C
 ### 👨‍💻 Remote coding on your own machine
 Combine the toolsets and an agent can run the full life-cycle of a coding task right on your PC: open the IDE/project folder → read code → edit files → build & test via PowerShell → open the browser and verify with DevTools → fix → `git commit` & `git push` to GitHub. You just give orders and supervise — from your phone if you like.
 
+### 🎯 Precision & reliability for agents (v0.9.0)
+- **Strict element refs**: every Snapshot labels interactive elements (`@e…`; scrollable ones `@s…`) and stores each element's full identity evidence — role, `AutomationId`, stable name/description, plus the window handle corroborated by its process's creation-time token. `Invoke` / `SetValue` / `Toggle` re-resolve the ref against the live window by counting matches: exactly one → act; none → `STALE_REF`; several → `AMBIGUOUS_TARGET`. Never a guess — and control values and bounds never count as identity.
+- **Query tools**: `Find` locates elements in the current snapshot by role, name or AutomationId; `Get` reads one property of a ref; `Is` evaluates a predicate — simple questions no longer need a full re-capture.
+- **Actionability auto-wait**: before a ref action dispatches, a live battery (visible / enabled / bounding-rect stable) is polled inside a bounded budget, so a button that only enables a second later simply works; terminal failures (unsupported pattern, stale ref) still fail fast.
+- **Batch**: run a whole sequence in one `Batch` call — a single control-gate acquisition, per-step results, and a stop at the first failure with the remaining steps honestly reported as not run.
+- **Typed errors, safe retries**: every action result ends with a delivery disposition and every failure with a typed error code, so an agent retries only when `retry=safe` — no double-submits, no toggle-undoes-itself (see *Action results* below).
+- **Guide, sessions, trace**: the `Guide` tool serves the bundled agent playbook stamped with the version actually running; `Session` namespaces snapshot refs per task; an opt-in JSONL trace records every call for incident analysis (details below).
+
 ### 🛡️ Safety & control stay yours
 - **Always-on visual indicator**: while the AI is in control, your screen shows a **glowing border** + a notice panel at the top edge + an aura around the cursor — it never controls your PC "in secret".
 - **Take-back key**: press **`Ctrl + Alt + Shift + Space`** to seize control back instantly; the agent only resumes after you've been idle long enough.
@@ -109,6 +117,10 @@ Combine the toolsets and an agent can run the full life-cycle of a coding task r
 - **Agent-priority mode** (optional): the agent is not interrupted by ordinary mouse/keyboard input — only the chord above can take over.
 - **Mandatory authentication**: API key via `Authorization: Bearer <token>` header or OAuth; expose the endpoint only over a private network (Tailscale/WireGuard) or HTTPS.
 - **No telemetry by default**: the source ships with no tracking key; usage analytics activates only if you set the `POSTHOG_API_KEY` environment variable yourself.
+- **UIPI fail-closed**: before physical input or a UIA pattern write, the server compares token integrity levels; a higher-integrity target (e.g. an app running as administrator) gets a typed `PERM_DENIED` and nothing is sent — `SendInput` reporting success is never treated as proof of delivery (see *Integrity levels (UIPI)* below).
+- **Password fields stay secret**: elements marked `IsPassword` never expose their value in snapshots, results or logs, and `SetValue` never echoes what was typed into them.
+- **Protected processes**: the kill path refuses session-critical images (`explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`) by exact name match — a lookalike like `explorer-notes.exe` stays closable (see *Protected processes* below).
+- **A channel that heals itself**: `ControlStatus` exposes a health block (watchdog liveness, recovery events, and `last_fault` — the site and exception of the most recent fail-open). When the control channel wedges, opt-in `health_recovery` restarts its input-monitor threads in-process; if thread restarts stop clearing the latch, it escalates to a controlled process restart so the scheduler/watchdog bring up a fresh server instead of leaving a zombie holding the port.
 
 ---
 
@@ -136,7 +148,7 @@ Combine the toolsets and an agent can run the full life-cycle of a coding task r
    ┌─────────────┐  │   YOUR COMPUTER             │      ┌──────────────────┐
    │  AI AGENT   │  │   ┌───────────────────────┐  │      │      USER        │
    │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
-   │ ChatGPT ·   │MCP│   │  40 control tools     │  │ sees │ glowing border   │
+   │ ChatGPT ·   │MCP│   │  52 control tools     │  │ sees │ glowing border   │
    │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
    │ Gemini ·    │  │   │  PowerShell · files   │  │      │ · Space chord*   │
    │ DeepSeek... │  │   │  Browser DevTools     │  │      └──────────────────┘
@@ -243,7 +255,7 @@ Web-based agents don't install software on your machine — they connect to Agen
 
 1. Run the server in HTTP mode as above and expose it via Tailscale/HTTPS.
 2. In the agent, add a **custom connector / MCP server** with the URL `https://<your-machine>/mcp` and your auth key.
-3. The agent sees all 40 tools and can drive your PC — including opening projects, editing code and pushing to GitHub.
+3. The agent sees all 52 tools and can drive your PC — including opening projects, editing code and pushing to GitHub.
 
 ### ChatGPT
 ChatGPT supports MCP through **Developer mode / Connectors**:

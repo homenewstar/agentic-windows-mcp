@@ -13,7 +13,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-yellow)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-purple)
-![Tools](https://img.shields.io/badge/Tools-40-orange)
+![Tools](https://img.shields.io/badge/Tools-52-orange)
 [![Trendshift](https://img.shields.io/badge/Trendshift-跟踪趋势-ff6b35)](https://trendshift.io)
 
 [English](README.md) · [Tiếng Việt](README.vi.md) · [한국어](README.ko.md) · **中文**
@@ -136,7 +136,7 @@ Agentic Windows MCP 正是让这"三人组"中的"个人电脑"一环成为现�
    ┌─────────────┐  │   YOUR COMPUTER             │      ┌──────────────────┐
    │  AI AGENT   │  │   ┌───────────────────────┐  │      │      USER        │
    │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
-   │ ChatGPT ·   │MCP│   │  40 control tools     │  │ sees │ glowing border   │
+   │ ChatGPT ·   │MCP│   │  52 control tools     │  │ sees │ glowing border   │
    │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
    │ Gemini ·    │  │   │  PowerShell · files   │  │      │ · Space chord*   │
    │ DeepSeek... │  │   │  Browser DevTools     │  │      └──────────────────┘
@@ -243,7 +243,7 @@ idle_timeout_seconds = 10
 
 1. 按上文以 HTTP 模式运行服务器，并通过 Tailscale/HTTPS 暴露。
 2. 在智能体中添加一个**自定义连接器 / MCP 服务器**，URL 为 `https://<你的机器>/mcp`，并填入你的密钥。
-3. 智能体将看到全部 40 个工具，并能操控你的 PC——包括打开项目、修改代码并推送到 GitHub。
+3. 智能体将看到全部 52 个工具，并能操控你的 PC——包括打开项目、修改代码并推送到 GitHub。
 
 ### ChatGPT
 ChatGPT 通过**开发者模式 / 连接器**支持 MCP：
@@ -304,13 +304,14 @@ DeepSeek(以及其他模型)有两种连接方式：
 
 ---
 
-## 🧰 工具集(40 个工具)
+## 🧰 工具集(52 个工具)
 
 | 分组 | 工具 |
 |---|---|
 | **桌面控制** | `Click`、`Type`、`Move`、`Scroll`、`Shortcut`、`MultiSelect`、`MultiEdit`、`Snapshot`、`Screenshot`、`Wait`、`WaitFor` |
 | **应用与系统** | `App`、`PowerShell`、`FileSystem`、`Registry`、`Process`、`Clipboard`、`Notification`、`DisplayInventory`、`Scrape` |
-| **控制网关** | `ControlStatus`(当前谁在掌控、正在应用哪种策略) |
+| **元素引用与查询** | `Invoke`、`SetValue`、`Toggle`、`Find`、`Get`、`Is`、`Batch` |
+| **控制网关** | `ControlStatus`(当前谁在掌控、正在应用哪种策略)、`Guide`(内置的、与运行版本一致的智能体 playbook:`core` / `windows` / `operations`)、`Session`(命名的引用命名空间) |
 | **浏览器(CDP)** | `Browser_Connect`、`Browser_Navigate`、`Browser_ManageTabs`、`Browser_GetPageSnapshot`、`Browser_QueryElements`、`Browser_Interact`、`Browser_TakeScreenshot`、`Browser_Highlight`、`Browser_EvaluateScript` |
 | **深度 DevTools** | `Browser_GetCssStyles`、`Browser_GetComputedStyle`、`Browser_GetMatchedStyles`、`Browser_GetAccessibilityTree`、`Browser_ListConsoleMessages`、`Browser_ListNetworkRequests`、`Browser_GetNetworkDetails`、`Browser_GetStorage`、`Browser_ListPageSources`、`Browser_GetSourceText` |
 

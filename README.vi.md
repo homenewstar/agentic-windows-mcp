@@ -13,7 +13,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
 ![Python](https://img.shields.io/badge/Python-3.12%2B-yellow)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-purple)
-![Tools](https://img.shields.io/badge/Tools-40-orange)
+![Tools](https://img.shields.io/badge/Tools-52-orange)
 [![Trendshift](https://img.shields.io/badge/Trendshift-Theo%20dõi%20xu%20hướng-ff6b35)](https://trendshift.io)
 
 [English](README.md) · **Tiếng Việt** · [한국어](README.ko.md) · [中文](README.zh.md)
@@ -86,7 +86,7 @@ Một mình, AI Agent chỉ "nói" được. Một mình, chiếc PC của bạn
 - **Clipboard, thông báo, hiển thị**: đọc/ghi clipboard, gửi thông báo hệ thống, quản lý màn hình.
 
 ### ⚙️ Tự động hóa hệ thống
-- **PowerShell** không giới hạn: chạy lệnh, cài đặt phần mềm, quản trị hệ thống.
+- **PowerShell** không giới hạn: chạy lệnh, cài đặt phần mềm, quản trị hệ thống — kể cả **job chạy nền** (`background: true`, rồi theo dõi bằng `JobStatus` / `JobOutput` / `JobStop`) cho các lệnh chạy lâu mà không chặn agent.
 - **FileSystem**: đọc/ghi/liệt kê/di chuyển file & thư mục — đọc và sửa mã nguồn trực tiếp.
 - **Registry & Process**: đọc/sửa registry, liệt kê & dừng tiến trình.
 - **Scrape**: tải và trích xuất nội dung trang web.
@@ -102,6 +102,14 @@ Bộ công cụ Browser kết nối vào Chrome/Edge/Brave đang mở của bạ
 ### 👨‍💻 Lập trình từ xa trên chính máy của bạn
 Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đời của một tác vụ lập trình ngay trên PC của bạn: mở IDE/thư mục dự án → đọc code → sửa file → chạy build/test bằng PowerShell → mở trình duyệt kiểm tra kết quả bằng DevTools → sửa tiếp → `git commit` & `git push` lên GitHub. Bạn chỉ cần ra lệnh và giám sát — từ điện thoại cũng được.
 
+### 🎯 Chính xác & tin cậy cho agent (v0.9.0)
+- **Ref phần tử nghiêm ngặt**: mỗi Snapshot gán nhãn cho phần tử tương tác được (`@e…`; phần tử cuộn được là `@s…`) và lưu bằng chứng định danh đầy đủ của từng phần tử — role, `AutomationId`, tên/mô tả ổn định, kèm handle cửa sổ được đối chứng bằng token thời điểm tạo tiến trình. `Invoke` / `SetValue` / `Toggle` tái định danh ref trên cửa sổ sống bằng cách đếm số phần tử khớp: đúng một → thực hiện; không có → `STALE_REF`; nhiều hơn một → `AMBIGUOUS_TARGET`. Không bao giờ đoán — và giá trị điều khiển (value) hay tọa độ (bounds) không bao giờ được tính là định danh.
+- **Công cụ truy vấn**: `Find` tìm phần tử trong snapshot hiện tại theo role, tên hoặc AutomationId; `Get` đọc một thuộc tính của ref; `Is` kiểm tra một điều kiện — những câu hỏi đơn giản không cần chụp lại toàn bộ.
+- **Tự chờ khả thi (auto-wait)**: trước khi một thao tác theo ref được thực thi, một bộ kiểm tra trực tiếp (hiển thị / đang bật / khung bao ổn định) được thăm dò trong ngân sách thời gian giới hạn, nên nút bấm một giây sau mới bật vẫn thao tác được; lỗi "chết hẳn" (pattern không hỗ trợ, ref stale) vẫn fail ngay.
+- **Batch**: chạy cả một chuỗi thao tác trong một lần gọi `Batch` — chỉ một lần qua cổng kiểm soát, kết quả từng bước, dừng ở bước lỗi đầu tiên và các bước còn lại được báo trung thực là chưa chạy.
+- **Lỗi có kiểu, retry an toàn**: mọi kết quả hành động đều kết thúc bằng disposition về phân phối (delivery), mọi lỗi đều có mã lỗi có kiểu — agent chỉ retry khi `retry=safe`, tránh nộp form hai lần hay toggle tự đảo ngược.
+- **Guide, session, trace**: công cụ `Guide` phục vụ playbook cho agent đóng gói sẵn, đóng dấu đúng phiên bản đang chạy; `Session` tách namespace cho ref theo từng phiên; trace JSONL (opt-in) ghi lại mọi lần gọi để phân tích sự cố.
+
 ### 🛡️ An toàn & quyền kiểm soát thuộc về bạn
 - **Chỉ báo trực quan luôn bật**: khi AI đang điều khiển, màn hình có **viền phát sáng** + bảng báo ở cạnh trên + quầng sáng quanh con trỏ — không bao giờ điều khiển "lén".
 - **Phím lấy lại quyền**: nhấn **`Ctrl + Alt + Shift + Space`** để giành lại quyền điều khiển ngay lập tức; Agent chỉ tiếp tục khi bạn đã nhàn rỗi đủ lâu.
@@ -109,6 +117,10 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
 - **Chế độ ưu tiên Agent** (tùy chọn): Agent không bị ngắt bởi di chuột/gõ phím thông thường — chỉ phím tắt trên mới takeover được.
 - **Xác thực bắt buộc**: API key qua header `Authorization: Bearer <token>` hoặc OAuth; chỉ nên phơi endpoint qua mạng riêng (Tailscale/WireGuard) hoặc HTTPS.
 - **Không telemetry mặc định**: mã nguồn không chứa sẵn khóa theo dõi; phân tích sử dụng chỉ bật khi bạn tự đặt biến môi trường `POSTHOG_API_KEY`.
+- **UIPI fail-closed**: trước khi gửi input vật lý hoặc ghi qua pattern UIA, server so sánh mức toàn vẹn (integrity) của token; đích ở mức cao hơn (ví dụ app chạy quyền administrator) sẽ nhận lỗi có kiểu `PERM_DENIED` và không có gì được gửi đi — `SendInput` báo thành công không bao giờ được coi là bằng chứng đã phân phối.
+- **Ô mật khẩu luôn bí mật**: phần tử có `IsPassword` không bao giờ lộ giá trị trong snapshot, kết quả hay log, và `SetValue` không bao giờ echo lại nội dung đã nhập vào chúng.
+- **Tiến trình được bảo vệ**: đường kill từ chối các image critical của phiên (`explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`) theo khớp tên chính xác — app có tên na ná như `explorer-notes.exe` vẫn đóng được bình thường.
+- **Kênh tự hồi phục**: `ControlStatus` có block health (watchdog còn sống, sự kiện hồi phục, và `last_fault` — vị trí + exception của lần fail-open gần nhất). Khi kênh điều khiển wedged, `health_recovery` (opt-in) restart các luồng monitor ngay trong tiến trình; nếu restart luồng không còn gỡ được chốt, nó leo thang thành restart cả tiến trình có kiểm soát để scheduler/watchdog dựng một server mới, thay vì để lại zombie giữ cổng.
 
 ---
 
@@ -136,7 +148,7 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
    ┌─────────────┐  │   MÁY TÍNH CỦA BẠN          │      ┌──────────────────┐
    │  AI AGENT   │  │   ┌───────────────────────┐  │      │  NGƯỜI DÙNG      │
    │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤  giám sát · xem  │
-   │ ChatGPT ·   │MCP│   │  40 công cụ điều khiển │  │ nhìn │  viền phát sáng  │
+   │ ChatGPT ·   │MCP│   │  52 công cụ điều khiển │  │ nhìn │  viền phát sáng  │
    │ Claude ·    │◄──┼──┤  chuột · phím · app   │  │ thấy │  · bảng cảnh báo │
    │ Gemini ·    │  │   │  PowerShell · file    │  │      │  · phím Space*   │
    │ DeepSeek... │  │   │  DevTools trình duyệt│  │      └──────────────────┘
@@ -244,7 +256,7 @@ Các agent chạy trên nền web không tự cài phần mềm lên máy bạn 
 
 1. Chạy server ở chế độ HTTP như trên và phơi qua Tailscale/HTTPS.
 2. Trong agent, thêm **custom connector / MCP server** với URL `https://<máy-của-bạn>/mcp` và khóa xác thực.
-3. Agent sẽ thấy toàn bộ 40 công cụ và bắt đầu điều khiển được PC của bạn — kể cả việc mở dự án, sửa code và đẩy lên GitHub.
+3. Agent sẽ thấy toàn bộ 52 công cụ và bắt đầu điều khiển được PC của bạn — kể cả việc mở dự án, sửa code và đẩy lên GitHub.
 
 ### ChatGPT
 ChatGPT hỗ trợ MCP qua **Developer mode / Connectors**:
@@ -305,13 +317,14 @@ DeepSeek (và các mô hình khác) kết nối được theo hai cách:
 
 ---
 
-## 🧰 Bộ công cụ (40 tools)
+## 🧰 Bộ công cụ (52 tools)
 
 | Nhóm | Công cụ |
 |---|---|
 | **Điều khiển desktop** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
+| **Ref phần tử & truy vấn** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is`, `Batch` |
 | **Ứng dụng & hệ thống** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
-| **Cổng kiểm soát** | `ControlStatus` (xem ai đang giữ quyền điều khiển, chính sách đang áp dụng) |
+| **Cổng kiểm soát** | `ControlStatus` (xem ai đang giữ quyền điều khiển, chính sách đang áp dụng), `Guide` (playbook cho agent đóng gói sẵn, khớp phiên bản đang chạy: `core` / `windows` / `operations`), `Session` (namespace ref theo tên) |
 | **Trình duyệt (CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **DevTools chuyên sâu** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
 

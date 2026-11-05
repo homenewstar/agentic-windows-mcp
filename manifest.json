@@ -172,6 +172,10 @@
       "description": "Evaluate one predicate (enabled, visible, focused, checked, expanded, selected, editable, password) on a Snapshot ref element from the live element, returning true, false, or unknown when the live read cannot decide."
     },
     {
+      "name": "Batch",
+      "description": "Run an ordered sequence of actions (Click, Type, Invoke, SetValue, Toggle, Shortcut, Scroll, Move, Wait) in one call under a single control-gate lease, with per-step results; stops at the first failure unless continue_on_error is set."
+    },
+    {
       "name": "JobStatus",
       "description": "Reports a background PowerShell job's state (running/exited), exit code, elapsed time and buffered output size. Job ids come from the PowerShell tool with background=True."
     },

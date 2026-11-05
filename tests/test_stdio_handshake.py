@@ -45,6 +45,7 @@ pytestmark = pytest.mark.skipif(
 # guard on the tool surface: adding or renaming a tool must update this list.
 EXPECTED_TOOLS = {
     "App",
+    "Batch",
     "Browser_Connect",
     "Browser_EvaluateScript",
     "Browser_GetAccessibilityTree",

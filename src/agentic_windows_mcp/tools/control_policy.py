@@ -31,7 +31,7 @@ BROWSER_TOOLS = frozenset(
 # Categories describe desktop interference, not whether an operation is destructive.
 DIRECT = frozenset(
     {"Click", "Type", "Scroll", "Move", "Shortcut", "MultiSelect", "MultiEdit",
-     "Invoke", "SetValue", "Toggle"}
+     "Invoke", "SetValue", "Toggle", "Batch"}
 )
 POSSIBLE = frozenset({"PowerShell", "Notification", "JobStop"})
 OTHER = frozenset(

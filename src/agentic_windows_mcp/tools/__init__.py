@@ -2,6 +2,7 @@
 
 from agentic_windows_mcp.tools import (
     app,
+    batch,
     browser_devtools,
     clipboard,
     control_status,
@@ -28,6 +29,7 @@ _MODULES = [
     snapshot,
     elements,
     query,
+    batch,
     input,
     scrape,
     multi,

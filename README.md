@@ -375,13 +375,13 @@ Sequences that hold physical state — a drag's mouse button, MultiSelect's Ctrl
 
 **Sessions** namespace the snapshot refs. `Session` with `mode='start'` and a session id activates that namespace: Snapshots register into it, and refs from any other session stop resolving (a cross-session attempt fails with a `STALE_REF` that names the owning session, so the recovery is obvious). `mode='end'` returns to the default session; an ended session's refs are kept and resume when it is started again. Each session has a manifest under `~/.agentic-windows-mcp/sessions/<id>/` recording when it was created and ended.
 
-**Trace** (opt-in): with `AGENTIC_WINDOWS_MCP_TRACE=1`, the server appends a JSONL trace under `~/.agentic-windows-mcp/traces/` — one segment per process, first line a meta record (schema version, server version, pid, start time). Events cover tool calls (name, outcome, duration — **never arguments**, so no password value or credential can land in the trace), snapshot registrations, session lifecycle, and gate recovery/escalation actions. The schema evolves additively only. Merge all segments into one deterministic timeline for incident analysis with:
+**Trace** (opt-in): enable it in `config.toml` — `[trace] enabled = true`, with optional `directory = "D:/traces"` — and the server appends a JSONL trace under `~/.agentic-windows-mcp/traces/` (or the configured directory): one segment per process, first line a meta record (schema version, server version, pid, start time). The `AGENTIC_WINDOWS_MCP_TRACE` environment variable still works and overrides the config's `enabled` in either direction. Events cover tool calls (name, outcome, duration — **never arguments**, so no password value or credential can land in the trace), snapshot registrations, session lifecycle, and gate recovery/escalation actions. The schema evolves additively only. Merge all segments into one deterministic timeline for incident analysis with:
 
 ```
 agentic-windows-mcp trace-export [--dir <path>]
 ```
 
-Truncated or corrupt tail lines (what a killed process leaves behind) are skipped with a warning count instead of failing the export. Pre/post-action screenshots can be stored beside the trace by the writer when explicitly enabled; no tool enables that today, and such files should be treated as sensitive.
+Truncated or corrupt tail lines (what a killed process leaves behind) are skipped with a warning count instead of failing the export. A single session can request tracing for itself with `Session mode='start', trace=True` even when the server-wide switch is off. **Replay screenshots** — a frame from just before and just after each action call, stored beside the segment — are a separate, stronger opt-in: `[trace] capture_screenshots = true`, or `artifacts=True` on a session start. They are **unredacted screen content** (anything visible on the desktop lands in them); treat the files as sensitive, and note no environment variable can enable them.
 
 ## 🎯 Action results: delivery & retry dispositions
 

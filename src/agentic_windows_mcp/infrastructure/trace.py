@@ -7,17 +7,28 @@ duration — never arguments, so no secure-field value or credential
 can land here), gate/recovery actions, session lifecycle, and ref
 registrations/resolution failures.
 
-The trace is opt-in: set ``AGENTIC_WINDOWS_MCP_TRACE=1``. When off,
-``get_trace()`` returns None and every record site is a no-op check.
-Recording must never break the tool path — a failing trace write is
-swallowed. Schema evolution is additive only: readers ignore fields
-they do not know, and tolerate a truncated/corrupt tail (counted as
-warnings) because a killed process leaves exactly that behind.
+The trace is opt-in. Since #29 the switch lives in config.toml
+(``[trace] enabled = true``, optional ``directory`` and
+``capture_screenshots``) so it works under the Scheduled Task launch;
+``AGENTIC_WINDOWS_MCP_TRACE`` remains as an override for the enabled
+flag only — it can never turn screenshot capture on. A session can
+also request tracing explicitly (Session tool, ``trace=True``), which
+starts the writer for that session even when both switches are off.
+When off, ``get_trace()`` returns None and every record site is a
+no-op check. Recording must never break the tool path — a failing
+trace write is swallowed. Schema evolution is additive only: readers
+ignore fields they do not know, and tolerate a truncated/corrupt tail
+(counted as warnings) because a killed process leaves exactly that
+behind.
 
-Replay screenshots are a supported but deliberately unwired option:
-``TraceWriter(capture_screenshots=True)`` stores PNGs beside the
-segment when a caller passes image bytes. No tool passes any today —
-treat those files as sensitive if that ever changes.
+Replay screenshots (#29): when ``capture_screenshots`` is on (config
+``[trace] capture_screenshots = true``, or a session started with
+``artifacts=True``), the tool-call wrapper stores a frame from just
+before and just after each action call beside the segment. The frames
+are **unredacted screen content** — anything visible on the desktop
+lands in them, including other apps' windows. Treat the files as
+sensitive; the flag is off by default and no environment variable can
+enable it.
 """
 
 from __future__ import annotations
@@ -40,7 +51,36 @@ def _now_iso() -> str:
 
 
 def trace_enabled() -> bool:
+    """The env-var switch alone (kept for compatibility)."""
     return os.environ.get(_ENV_FLAG, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def resolve_trace_settings(config=None) -> dict:
+    """Effective trace settings from config + environment (#29).
+
+    The env var, when set to anything non-empty, overrides the config's
+    ``enabled`` flag in either direction (so an operator can force the
+    trace off without editing the file). ``directory`` and
+    ``capture_screenshots`` come from the config only — in particular
+    the environment can never enable screenshot capture.
+    """
+    enabled = False
+    directory: Path | None = None
+    capture_screenshots = False
+    if config is not None:
+        enabled = bool(getattr(config, "enabled", False))
+        raw_dir = str(getattr(config, "directory", "") or "").strip()
+        if raw_dir:
+            directory = Path(raw_dir).expanduser()
+        capture_screenshots = bool(getattr(config, "capture_screenshots", False))
+    env = os.environ.get(_ENV_FLAG, "").strip().lower()
+    if env:
+        enabled = env in ("1", "true", "yes", "on")
+    return {
+        "enabled": enabled,
+        "directory": directory,
+        "capture_screenshots": capture_screenshots,
+    }
 
 
 def default_trace_dir() -> Path:
@@ -112,26 +152,98 @@ class TraceWriter:
 _writer: TraceWriter | None = None
 _writer_lock = threading.Lock()
 
+# Registered by the server bootstrap (it owns the desktop); the
+# tool-call wrapper asks it for replay frames. Kept as a plain callable
+# so this module never imports the desktop stack.
+_screenshot_provider = None
 
-def init_trace(server_version: str | None = None) -> TraceWriter | None:
-    """Start the process segment when tracing is enabled (idempotent)."""
-    global _writer
-    if not trace_enabled():
+
+def set_screenshot_provider(provider) -> None:
+    global _screenshot_provider
+    _screenshot_provider = provider
+
+
+def capture_frame() -> bytes | None:
+    """One replay frame from the registered provider, or None.
+
+    Returns None unless a writer is active with capture_screenshots on,
+    so callers never pay for a capture nobody will store. Any provider
+    failure degrades to no frame — artifacts must never break a call.
+    """
+    writer = _writer
+    if writer is None or not writer.capture_screenshots:
         return None
-    if server_version is None:
-        try:
-            from importlib import metadata
+    provider = _screenshot_provider
+    if provider is None:
+        return None
+    try:
+        frame = provider()
+    except Exception:
+        logger.debug("trace screenshot provider failed", exc_info=True)
+        return None
+    return frame if isinstance(frame, (bytes, bytearray)) else None
 
-            server_version = metadata.version("agentic-windows-mcp")
-        except Exception:
-            server_version = "unknown"
+
+def _resolve_server_version(server_version: str | None) -> str:
+    if server_version is not None:
+        return server_version
+    try:
+        from importlib import metadata
+
+        return metadata.version("agentic-windows-mcp")
+    except Exception:
+        return "unknown"
+
+
+def init_trace(server_version: str | None = None, config=None) -> TraceWriter | None:
+    """Start the process segment when tracing is enabled (idempotent).
+
+    ``config`` is the ``[trace]`` section of the server config (#29);
+    without one, only the env var can enable the trace (pre-#29
+    behaviour).
+    """
+    global _writer
+    settings = resolve_trace_settings(config)
+    if not settings["enabled"]:
+        return None
+    server_version = _resolve_server_version(server_version)
     with _writer_lock:
         if _writer is None:
             try:
-                _writer = TraceWriter(server_version=server_version)
+                _writer = TraceWriter(
+                    settings["directory"],
+                    server_version=server_version,
+                    capture_screenshots=settings["capture_screenshots"],
+                )
             except Exception:
                 logger.warning("trace init failed; continuing without trace", exc_info=True)
                 return None
+        return _writer
+
+
+def ensure_trace(
+    *, capture_screenshots: bool = False, server_version: str | None = None
+) -> TraceWriter | None:
+    """Start the writer on explicit request (Session tool, #29).
+
+    Unlike init_trace this ignores the enabled switches — the request
+    itself is the opt-in. On an already-running writer it can only turn
+    screenshot capture *on*; it never turns an existing setting off.
+    """
+    global _writer
+    server_version = _resolve_server_version(server_version)
+    with _writer_lock:
+        if _writer is None:
+            try:
+                _writer = TraceWriter(
+                    server_version=server_version,
+                    capture_screenshots=capture_screenshots,
+                )
+            except Exception:
+                logger.warning("trace start failed", exc_info=True)
+                return None
+        elif capture_screenshots:
+            _writer.capture_screenshots = True
         return _writer
 
 

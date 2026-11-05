@@ -1,6 +1,10 @@
 from contextlib import asynccontextmanager
 from agentic_windows_mcp.config import enable_debug
-from agentic_windows_mcp.infrastructure.config import ControlConfig, validate_idle_timeout
+from agentic_windows_mcp.infrastructure.config import (
+    ControlConfig,
+    TraceConfig,
+    validate_idle_timeout,
+)
 from agentic_windows_mcp.infrastructure import (
     AuthKeyMiddleware,
     OAuthOnlyMiddleware,
@@ -68,6 +72,7 @@ analytics: Any | None = None
 screen_size: Any | None = None
 _mcp: FastMCP | None = None
 _control_config = ControlConfig()
+_trace_config = TraceConfig()
 _control_notifier: Any | None = None
 
 instructions = dedent("""
@@ -335,11 +340,28 @@ def _build_mcp() -> FastMCP:
 
         watchdog = _start_watchdog(desktop)
 
-        # Issue #20: opt-in JSONL trace (AGENTIC_WINDOWS_MCP_TRACE=1);
-        # init_trace() is a no-op when the flag is unset.
-        from agentic_windows_mcp.infrastructure.trace import init_trace
+        # Issue #20: opt-in JSONL trace. Issue #29: the switch is the
+        # [trace] config section (the env var remains an override for
+        # the enabled flag); init_trace() is a no-op when both are off.
+        from agentic_windows_mcp.infrastructure.trace import (
+            init_trace,
+            set_screenshot_provider,
+        )
 
-        init_trace()
+        init_trace(config=_trace_config)
+
+        # Replay artifacts (#29): the frame source for pre/post-action
+        # screenshots. Registered unconditionally — the trace module
+        # only ever calls it while a writer has capture_screenshots on,
+        # which requires the config flag or a per-session opt-in.
+        def _trace_frame() -> bytes:
+            import io
+
+            buffer = io.BytesIO()
+            desktop.get_screenshot().save(buffer, format="PNG")
+            return buffer.getvalue()
+
+        set_screenshot_provider(_trace_frame)
 
         # Set thresholds before installing input hooks; invalid TOML was rejected at load.
         controller.mouse_takeover_units = _control_config.mouse_takeover_units
@@ -760,7 +782,7 @@ def serve(
     control_idle_timeout,
     control_policy,
 ):
-    global _control_config
+    global _control_config, _trace_config
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     install_selfpipe_guard()
     if transport == Transport.STDIO.value:
@@ -778,6 +800,7 @@ def serve(
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc))
     _control_config = cfg.control
+    _trace_config = cfg.trace
     _control_config.policy = _choose_value(
         ctx, "control_policy", control_policy, cfg.control.policy, "relaxed"
     )

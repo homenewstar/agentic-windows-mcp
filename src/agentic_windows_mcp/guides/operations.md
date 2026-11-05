@@ -46,6 +46,23 @@
   entirely — that is the supervisor's job, and no client-side retry
   loop will fix it.
 
+## Sessions and the trace
+
+- The JSONL trace is switched from `config.toml` (`[trace] enabled =
+  true`, optional `directory`); `AGENTIC_WINDOWS_MCP_TRACE` overrides
+  the enabled flag only. A session can request tracing for itself
+  (`Session` start with `trace=True`) even when the server-wide
+  switch is off. Trace events carry tool name, outcome and duration —
+  never arguments.
+- Replay screenshots are a separate, stronger opt-in (`[trace]
+  capture_screenshots = true`, or `artifacts=True` on a session
+  start). When on, a frame from just before and just after each
+  action call is stored beside the trace segment. Those PNGs are
+  **unredacted screen content** — everything visible on the desktop
+  is in them. Treat them as sensitive, share them like screenshots,
+  and leave the flag off unless an investigation needs them. No
+  environment variable can enable them.
+
 ## When the channel wedges
 
 1. Stop issuing action calls; hammering a latched channel only queues

@@ -192,6 +192,24 @@ def with_analytics(
             except Exception:
                 pass
 
+            # Replay artifacts (#29): when the trace has screenshot
+            # capture explicitly enabled, store a frame from just before
+            # the call. capture_frame() is a no-op (returns None) unless
+            # a writer is capturing, so this costs nothing by default.
+            # The capture tools themselves are excluded — their output
+            # already is a frame.
+            from agentic_windows_mcp.infrastructure.trace import (
+                capture_frame,
+                record_event,
+            )
+
+            if tool_name not in ("State-Tool", "Screenshot-Tool"):
+                pre_frame = capture_frame()
+                if pre_frame is not None:
+                    record_event(
+                        "tool_call_pre", tool=tool_name, screenshot=pre_frame
+                    )
+
             try:
                 if inspect.iscoroutinefunction(func):
                     result = await func(*args, **kwargs)
@@ -212,11 +230,23 @@ def with_analytics(
                         {"duration_ms": duration_ms, "success": True, **client_data},
                     )
 
-                from agentic_windows_mcp.infrastructure.trace import record_event
-
-                record_event(
-                    "tool_call", tool=tool_name, ok=True, duration_ms=duration_ms
+                post_frame = (
+                    None
+                    if tool_name in ("State-Tool", "Screenshot-Tool")
+                    else capture_frame()
                 )
+                if post_frame is not None:
+                    record_event(
+                        "tool_call",
+                        tool=tool_name,
+                        ok=True,
+                        duration_ms=duration_ms,
+                        screenshot=post_frame,
+                    )
+                else:
+                    record_event(
+                        "tool_call", tool=tool_name, ok=True, duration_ms=duration_ms
+                    )
 
                 return result
             except Exception as error:
@@ -230,15 +260,28 @@ def with_analytics(
                             **client_data,
                         },
                     )
-                from agentic_windows_mcp.infrastructure.trace import record_event
-
-                record_event(
-                    "tool_call",
-                    tool=tool_name,
-                    ok=False,
-                    duration_ms=duration_ms,
-                    error=type(error).__name__,
+                post_frame = (
+                    None
+                    if tool_name in ("State-Tool", "Screenshot-Tool")
+                    else capture_frame()
                 )
+                if post_frame is not None:
+                    record_event(
+                        "tool_call",
+                        tool=tool_name,
+                        ok=False,
+                        duration_ms=duration_ms,
+                        error=type(error).__name__,
+                        screenshot=post_frame,
+                    )
+                else:
+                    record_event(
+                        "tool_call",
+                        tool=tool_name,
+                        ok=False,
+                        duration_ms=duration_ms,
+                        error=type(error).__name__,
+                    )
                 raise error
 
         return wrapper

@@ -55,11 +55,26 @@ class ControlConfig:
 
 
 @dataclass
+class TraceConfig:
+    # Issue #29: the JSONL trace (#20) is switched from config.toml so it
+    # works under the Scheduled Task launch, where setting an environment
+    # variable is awkward. The AGENTIC_WINDOWS_MCP_TRACE env var remains
+    # as an override for `enabled` only — it can never turn screenshot
+    # capture on, because replay frames are unredacted screen content and
+    # enabling them must be a deliberate, visible choice (here, or per
+    # session via the Session tool).
+    enabled: bool = False
+    directory: str = ""
+    capture_screenshots: bool = False
+
+
+@dataclass
 class WindowsMCPConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     control: ControlConfig = field(default_factory=ControlConfig)
+    trace: TraceConfig = field(default_factory=TraceConfig)
     source_path: Path | None = None
 
 
@@ -135,6 +150,7 @@ def load_config(path: Path | None) -> WindowsMCPConfig:
     security = data.get("security", {})
     tools = data.get("tools", {})
     control = data.get("control", {})
+    trace = data.get("trace", {})
 
     _VALID_TRANSPORTS = {"stdio", "sse", "streamable-http"}
     if "transport" in server:
@@ -204,6 +220,15 @@ def load_config(path: Path | None) -> WindowsMCPConfig:
                 raise ValueError(f"control.{key} must be between 40 and 2000")
             setattr(cfg.control, key, value)
 
+    if "enabled" in trace:
+        cfg.trace.enabled = _strict_bool(trace["enabled"], "trace.enabled")
+    if "directory" in trace:
+        cfg.trace.directory = _strict_string(trace["directory"], "trace.directory")
+    if "capture_screenshots" in trace:
+        cfg.trace.capture_screenshots = _strict_bool(
+            trace["capture_screenshots"], "trace.capture_screenshots"
+        )
+
     cfg.source_path = path
     return cfg
 
@@ -268,5 +293,18 @@ def write_config(cfg: WindowsMCPConfig, path: Path) -> None:
         control_lines.append(f"health_recovery = {str(ctrl.health_recovery).lower()}")
     if control_lines:
         lines += ["[control]", *control_lines, ""]
+
+    trc, default_trc = cfg.trace, TraceConfig()
+    trace_lines: list[str] = []
+    if trc.enabled != default_trc.enabled:
+        trace_lines.append(f"enabled = {str(trc.enabled).lower()}")
+    if trc.directory != default_trc.directory:
+        trace_lines.append(f'directory = "{trc.directory}"')
+    if trc.capture_screenshots != default_trc.capture_screenshots:
+        trace_lines.append(
+            f"capture_screenshots = {str(trc.capture_screenshots).lower()}"
+        )
+    if trace_lines:
+        lines += ["[trace]", *trace_lines, ""]
 
     path.write_text("\n".join(lines), encoding="utf-8")

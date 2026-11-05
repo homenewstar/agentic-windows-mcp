@@ -14,7 +14,7 @@ from mcp.types import ToolAnnotations
 
 from agentic_windows_mcp.infrastructure import with_analytics
 from agentic_windows_mcp.infrastructure.sessions import SessionStore
-from agentic_windows_mcp.infrastructure.trace import record_event
+from agentic_windows_mcp.infrastructure.trace import ensure_trace, record_event
 
 
 def register(mcp, *, get_desktop, get_analytics) -> None:
@@ -30,7 +30,12 @@ def register(mcp, *, get_desktop, get_analytics) -> None:
             "the default session; the ended session's refs are kept and "
             "resume if it is started again. Use sessions to keep parallel "
             "lines of work (or a long investigation) from clobbering each "
-            "other's refs."
+            "other's refs. mode='start' also accepts trace=True to start "
+            "the JSONL trace for this session even when the server-wide "
+            "trace switches are off, and artifacts=True to additionally "
+            "store pre/post-action replay screenshots beside the trace — "
+            "those PNGs are unredacted screen content, treat them as "
+            "sensitive."
         ),
         annotations=ToolAnnotations(
             title="Session",
@@ -42,7 +47,11 @@ def register(mcp, *, get_desktop, get_analytics) -> None:
     )
     @with_analytics(get_analytics(), "Session-Tool", run_sync_in_thread=False)
     def session_tool(
-        mode: str = "status", session_id: str = "", ctx: Context = None
+        mode: str = "status",
+        session_id: str = "",
+        trace: bool = False,
+        artifacts: bool = False,
+        ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
         store = SessionStore()
@@ -54,7 +63,32 @@ def register(mcp, *, get_desktop, get_analytics) -> None:
                 info = desktop.activate_session(session_id)
             except ValueError as e:
                 return f"Error: {e}"
-            store.create(info["session"], options={"via": "Session tool"})
+            store.create(
+                info["session"],
+                options={
+                    "via": "Session tool",
+                    "trace": bool(trace),
+                    "artifacts": bool(artifacts),
+                },
+            )
+            trace_note = ""
+            if trace or artifacts:
+                # Explicit per-session opt-in (#29): start the writer
+                # even when the server-wide switches are off.
+                writer = ensure_trace(capture_screenshots=bool(artifacts))
+                if writer is None:
+                    trace_note = (
+                        " Trace was requested but could not be started; "
+                        "the session itself is unaffected."
+                    )
+                elif artifacts:
+                    trace_note = (
+                        f" Trace is recording to {writer.path} with replay "
+                        "screenshots ON — those PNGs are unredacted screen "
+                        "content; treat them as sensitive."
+                    )
+                else:
+                    trace_note = f" Trace is recording to {writer.path}."
             record_event(
                 "session_started", session=info["session"], created=info["created"]
             )
@@ -64,6 +98,7 @@ def register(mcp, *, get_desktop, get_analytics) -> None:
                 f"generation {info['generation']}, {info['refs']} refs). "
                 "Snapshots now register into this session, and refs from "
                 "other sessions will not resolve here."
+                + trace_note
             )
         if mode == "end":
             previous = desktop.end_session()

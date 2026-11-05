@@ -65,6 +65,25 @@ def _read_integrity_rid(pid: int) -> int | None:
 
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Pointer-returning functions MUST declare restype: ctypes otherwise
+    # truncates the 64-bit pointer to a C int, and dereferencing the
+    # truncated value is a hard access violation, not an exception (this
+    # crashed the whole test process on CI before these declarations).
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+        wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+    advapi32.GetSidSubAuthorityCount.argtypes = [ctypes.c_void_p]
+    advapi32.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+    advapi32.GetSidSubAuthority.argtypes = [ctypes.c_void_p, wintypes.DWORD]
     handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return None
@@ -89,11 +108,11 @@ def _read_integrity_rid(pid: int) -> int | None:
             count_ptr = advapi32.GetSidSubAuthorityCount(ctypes.c_void_p(sid))
             if not count_ptr:
                 return None
-            count = ctypes.cast(count_ptr, ctypes.POINTER(ctypes.c_ubyte)).contents.value
+            count = count_ptr.contents.value
             rid_ptr = advapi32.GetSidSubAuthority(ctypes.c_void_p(sid), count - 1)
             if not rid_ptr:
                 return None
-            return int(ctypes.cast(rid_ptr, ctypes.POINTER(wintypes.DWORD)).contents.value)
+            return int(rid_ptr.contents.value)
         finally:
             kernel32.CloseHandle(token)
     except Exception:

@@ -26,6 +26,7 @@ from agentic_windows_mcp.infrastructure.errors import (
     DELIVERED_UNVERIFIED,
     DELIVERED_VERIFIED,
     classify_error,
+    success_suffix,
 )
 from fastmcp import Context
 
@@ -241,28 +242,28 @@ def register(mcp, *, get_desktop, get_analytics):
             try:
                 message, disposition = _run_step(desktop, step)
             except (StaleRefError, AmbiguousRefError) as e:
-                disposition_obj = classify_error(e)
+                code, disp, _recovery = classify_error(e)
                 lines.append(
                     f"{number}. {step['tool']}: FAILED — {e} "
-                    f"[error code={disposition_obj.code} "
-                    f"delivery={disposition_obj.delivery} "
-                    f"retry={disposition_obj.retry}]"
+                    f"[error code={code} "
+                    f"delivery={disp.delivery} "
+                    f"retry={disp.retry}]"
                 )
                 if not keep_going:
                     stopped_at = index
             except Exception as e:
-                disposition_obj = classify_error(e)
+                code, disp, _recovery = classify_error(e)
                 lines.append(
                     f"{number}. {step['tool']}: FAILED — {type(e).__name__}: {e} "
-                    f"[error code={disposition_obj.code} "
-                    f"delivery={disposition_obj.delivery} "
-                    f"retry={disposition_obj.retry}]"
+                    f"[error code={code} "
+                    f"delivery={disp.delivery} "
+                    f"retry={disp.retry}]"
                 )
                 if not keep_going:
                     stopped_at = index
             else:
                 succeeded += 1
-                suffix = f" [delivery={disposition}]" if disposition else ""
+                suffix = f" {success_suffix(disposition).strip()}" if disposition else ""
                 lines.append(f"{number}. {step['tool']}: ok — {message}{suffix}")
         total = len(validated)
         if stopped_at is None:

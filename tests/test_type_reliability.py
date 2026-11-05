@@ -96,11 +96,13 @@ class TestVerifyWiring:
         monkeypatch.setattr(
             Desktop, "_read_focused_text", lambda self: next(reads)
         )
-        result = instance.type(
+        monkeypatch.setattr(Desktop, "_focused_is_password", lambda self: False)
+        verification, secure = instance.type(
             loc=(100, 100), text="typed text", clear=True, verify=True
         )
-        assert result is not None
-        assert result[0] == "verified"
+        assert secure is False
+        assert verification is not None
+        assert verification[0] == "verified"
 
     def test_verify_detects_a_dropped_character(self, rig, monkeypatch: pytest.MonkeyPatch):
         instance, _, _ = rig
@@ -108,11 +110,13 @@ class TestVerifyWiring:
         monkeypatch.setattr(
             Desktop, "_read_focused_text", lambda self: next(reads)
         )
-        result = instance.type(
+        monkeypatch.setattr(Desktop, "_focused_is_password", lambda self: False)
+        verification, secure = instance.type(
             loc=(100, 100), text="hello world", clear=True, verify=True
         )
-        assert result is not None
-        assert result[0] == "mismatch"
+        assert secure is False
+        assert verification is not None
+        assert verification[0] == "mismatch"
 
     def test_no_verify_returns_none_and_never_reads(self, rig, monkeypatch: pytest.MonkeyPatch):
         instance, _, _ = rig
@@ -121,7 +125,10 @@ class TestVerifyWiring:
             raise AssertionError("_read_focused_text must not be called without verify")
 
         monkeypatch.setattr(Desktop, "_read_focused_text", forbidden)
-        assert instance.type(loc=(100, 100), text="hi") is None
+        monkeypatch.setattr(Desktop, "_focused_is_password", lambda self: False)
+        verification, secure = instance.type(loc=(100, 100), text="hi")
+        assert verification is None
+        assert secure is False
 
 
 class FakeMCP:

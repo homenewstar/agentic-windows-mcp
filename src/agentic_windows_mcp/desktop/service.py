@@ -202,6 +202,10 @@ class ElementRef:
     window_handle: int
     name: str
     control_type: str
+    # Secure-field marker (#15): the element's IsPassword state at snapshot
+    # time. Carried on the ref so write tools can refuse to echo values; the
+    # ref identity itself never contains the field's content.
+    is_password: bool = False
 
 
 def find_control_by_runtime_id(root, runtime_id: tuple, max_nodes: int = 20000):
@@ -879,6 +883,7 @@ class Desktop:
                 window_handle=getattr(node, "window_handle", 0),
                 name=node.name,
                 control_type=node.control_type,
+                is_password=bool((getattr(node, "metadata", None) or {}).get("is_password")),
             )
         base = len(interactive)
         for j, node in enumerate(scrollable):
@@ -889,6 +894,7 @@ class Desktop:
                 window_handle=getattr(node, "window_handle", 0),
                 name=node.name,
                 control_type=node.control_type,
+                is_password=bool((getattr(node, "metadata", None) or {}).get("is_password")),
             )
         self._element_refs = refs
         return self._refs_generation
@@ -1134,6 +1140,10 @@ class Desktop:
         self._check_uipi_point(x, y, "Type")
         uia.Click(x, y)
         owner.record_step_current()
+        # Secure fields (#15): when the click landed in a password field, the
+        # value is never read back (no baseline, no verification read) and
+        # the caller is told not to echo the typed text in its result.
+        secure_target = self._focused_is_password()
         if caret_position == "start":
             owner.checkpoint_current()
             uia.SendKeys("{Home}", waitTime=0.05)
@@ -1142,7 +1152,7 @@ class Desktop:
             owner.checkpoint_current()
             uia.SendKeys("{End}", waitTime=0.05)
             owner.record_step_current()
-        baseline = self._read_focused_text() if verify else None
+        baseline = self._read_focused_text() if verify and not secure_target else None
         if clear:
             sleep(0.5)
             owner.checkpoint_current()
@@ -1167,18 +1177,25 @@ class Desktop:
                     sleep(self._TYPE_CHUNK_PAUSE)
         verification = None
         if verify:
-            verification = _assess_typed_text(
-                baseline,
-                text,
-                self._read_focused_text(),
-                clear=clear,
-                caret_position=caret_position,
-            )
+            if secure_target:
+                verification = (
+                    "unavailable",
+                    "the target is a secure (password) field; its value is "
+                    "never read back, so the typed text cannot be verified",
+                )
+            else:
+                verification = _assess_typed_text(
+                    baseline,
+                    text,
+                    self._read_focused_text(),
+                    clear=clear,
+                    caret_position=caret_position,
+                )
         if press_enter:
             owner.checkpoint_current()
             uia.SendKeys("{Enter}", waitTime=0.05)
             owner.record_step_current()
-        return verification
+        return verification, secure_target
 
     def _paste_text(self, text: str):
         """Stash text on the clipboard, Ctrl+V, restore prior clipboard.
@@ -1207,6 +1224,20 @@ class Desktop:
                         uia.SetClipboardText(prior)
                 except Exception:
                     pass
+
+    def _focused_is_password(self) -> bool:
+        """True when the focused element is a secure (password) field (#15).
+
+        Any failure — no focused element, no IsPassword property — reads as
+        not secure, matching how the pre-#15 code behaved for ordinary fields.
+        """
+        try:
+            control = uia.GetFocusedControl()
+            if control is None:
+                return False
+            return bool(control.IsPassword)
+        except Exception:
+            return False
 
     def _read_focused_text(self) -> str | None:
         """Best-effort read of the focused element's text value.

@@ -39,8 +39,9 @@ class FakeDesktop:
         self.desktop_state = object()
         self.type_calls: list[dict[str, object]] = []
 
-    def type(self, **kwargs: object) -> None:
+    def type(self, **kwargs: object) -> tuple[None, bool]:
         self.type_calls.append(kwargs)
+        return None, False
 
 
 def _tools(desktop: FakeDesktop) -> dict[str, Callable]:

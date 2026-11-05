@@ -30,7 +30,10 @@ def _node_meta_str(metadata: dict[str, Any]) -> str:
     # Compare against None rather than testing truthiness: a slider sitting at its
     # minimum reports value 0.0, which is falsy, so a plain `if value` silently hides
     # the value of every zeroed volume/brightness/zoom control.
-    if value is not None and value not in ("", "(empty)"):
+    # Secure fields (#15): a password node's value is never rendered, even if
+    # some producer put one in metadata anyway (defense in depth — the capture
+    # side already withholds it).
+    if value is not None and value not in ("", "(empty)") and not metadata.get("is_password"):
         parts.append(f'value:"{value}"')
     # Range bounds are meaningless for most controls but essential for a slider -- without
     # them an agent knows the current value yet has no idea how far it can be moved.

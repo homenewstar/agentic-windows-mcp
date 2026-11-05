@@ -415,11 +415,20 @@ class Tree:
                     metadata['shortcut']=accelerator_key
 
                 if isinstance(node,EditControl):
+                    # Secure fields (#15): a password edit's value is never
+                    # captured into metadata, in this DOM branch either.
                     try:
-                        value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
-                        metadata['value']=value.strip() if value else '(empty)'
+                        is_password = bool(node.CachedIsPassword)
                     except Exception:
-                        pass
+                        is_password = False
+                    if is_password:
+                        metadata['is_password']=True
+                    else:
+                        try:
+                            value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
+                            metadata['value']=value.strip() if value else '(empty)'
+                        except Exception:
+                            pass
 
                     try:
                         help_text = node.CachedHelpText
@@ -677,16 +686,20 @@ class Tree:
                                 except Exception:
                                     pass
 
-                                try:
-                                    value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
-                                    metadata['value']=value.strip() if value else '(empty)'
-                                    if not is_password and not is_dom:
-                                        words=node.GetAllWordBoundingBoxes()
-                                        for word,boxes in words:
-                                            for box in boxes:
-                                                word_elements.append((word,box))
-                                except Exception:
-                                    pass
+                                # Secure fields (#15): when IsPassword is set the
+                                # value is not read at all, so the secret never
+                                # enters metadata, snapshot text, or logs.
+                                if not is_password:
+                                    try:
+                                        value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
+                                        metadata['value']=value.strip() if value else '(empty)'
+                                        if not is_dom:
+                                            words=node.GetAllWordBoundingBoxes()
+                                            for word,boxes in words:
+                                                for box in boxes:
+                                                    word_elements.append((word,box))
+                                    except Exception:
+                                        pass
 
                                 # Selection state, reported only when there is a real (non-empty)
                                 # selection — a bare caret is the resting state of every focused

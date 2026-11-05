@@ -351,7 +351,7 @@ def register(
         if len(loc) != 2:
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]
-        verification = desktop.type(
+        verification, secure_target = desktop.type(
             loc=loc,
             text=text,
             caret_position=caret_position,
@@ -359,7 +359,14 @@ def register(
             press_enter=press_enter,
             verify=verify,
         )
-        message = f"Typed {text} at ({x},{y})."
+        if secure_target:
+            # Secure fields (#15): never echo a password in the tool result.
+            message = (
+                f"Typed into the secure (password) field at ({x},{y}); "
+                "the text is not echoed."
+            )
+        else:
+            message = f"Typed {text} at ({x},{y})."
         if verify:
             if verification is None:
                 message += " Verification unavailable: the desktop returned no result."

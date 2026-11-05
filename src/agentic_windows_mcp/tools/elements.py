@@ -83,6 +83,13 @@ def register(mcp, *, get_desktop, get_analytics):
             element = get_desktop().set_element_value(label, value, snapshot)
         except StaleRefError as e:
             raise _stale(e) from e
+        if getattr(element, "is_password", False):
+            # Secure fields (#15): the value was set but is never echoed
+            # back into the tool result, logs, or audit output.
+            return (
+                f"Set @e{label} ({element.control_type} \"{element.name}\") — "
+                "secure field; the value was set and is not echoed."
+            )
         return f"Set @e{label} ({element.control_type} \"{element.name}\") to {value!r}."
 
     @mcp.tool(

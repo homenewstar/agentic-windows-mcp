@@ -331,6 +331,174 @@ def _rect_tuple(control):
     return (rect.left, rect.top, rect.right, rect.bottom)
 
 
+# ---- Snapshot query helpers (issue #17) ----
+#
+# Get/Is read LIVE properties through these readers. Each returns
+# (known, value): known=False means the element does not expose the
+# property or the read failed, and the caller must report "unknown" —
+# a value is never guessed. Any exception inside a reader is treated
+# the same way by the caller.
+
+def _q_name(ref, control):
+    return True, str(control.Name or "")
+
+
+def _q_automation_id(ref, control):
+    return True, str(control.AutomationId or "")
+
+
+def _q_enabled(ref, control):
+    return True, bool(control.IsEnabled)
+
+
+def _q_offscreen(ref, control):
+    return True, bool(control.IsOffscreen)
+
+
+def _q_focused(ref, control):
+    return True, bool(control.HasKeyboardFocus)
+
+
+def _q_bounds(ref, control):
+    rect = _rect_tuple(control)
+    return rect is not None, (list(rect) if rect is not None else None)
+
+
+def _q_value(ref, control):
+    # Secure fields (#15): a password value is never read back, not even
+    # by a query tool. The read is "known" — what is known is that the
+    # value exists and is withheld.
+    if getattr(ref, "is_password", False) or getattr(control, "IsPassword", False):
+        return True, "(secure field — value withheld)"
+    pattern = control.GetPattern(uia.PatternId.ValuePattern)
+    if pattern is not None:
+        return True, str(pattern.Value)
+    legacy = control.GetPattern(uia.PatternId.LegacyIAccessiblePattern)
+    if legacy is not None:
+        return True, str(legacy.Value)
+    return False, None
+
+
+def _q_toggle_state(ref, control):
+    pattern = control.GetPattern(uia.PatternId.TogglePattern)
+    if pattern is None:
+        return False, None
+    state = pattern.ToggleState
+    return True, {0: "Off", 1: "On", 2: "Indeterminate"}.get(state, str(state))
+
+
+def _q_selected(ref, control):
+    pattern = control.GetPattern(uia.PatternId.SelectionItemPattern)
+    if pattern is None:
+        return False, None
+    return True, bool(pattern.IsSelected)
+
+
+_QUERY_READERS = {
+    "name": _q_name,
+    "value": _q_value,
+    "bounds": _q_bounds,
+    "enabled": _q_enabled,
+    "offscreen": _q_offscreen,
+    "focused": _q_focused,
+    "toggle_state": _q_toggle_state,
+    "selected": _q_selected,
+    "automation_id": _q_automation_id,
+}
+
+
+def _p_enabled(ref, control):
+    return bool(control.IsEnabled)
+
+
+def _p_visible(ref, control):
+    return not bool(control.IsOffscreen)
+
+
+def _p_focused(ref, control):
+    return bool(control.HasKeyboardFocus)
+
+
+def _p_checked(ref, control):
+    known, state = _q_toggle_state(ref, control)
+    if not known:
+        return None
+    # Indeterminate is honestly neither checked nor unchecked.
+    return {"On": True, "Off": False}.get(state)
+
+
+def _p_expanded(ref, control):
+    pattern = control.GetPattern(uia.PatternId.ExpandCollapsePattern)
+    if pattern is None:
+        return None
+    state = pattern.ExpandCollapseState
+    if state in (1, 2):  # Expanded, PartiallyExpanded
+        return True
+    if state in (0, 3):  # Collapsed, LeafNode (a leaf cannot expand)
+        return False
+    return None
+
+
+def _p_selected(ref, control):
+    known, value = _q_selected(ref, control)
+    return value if known else None
+
+
+def _p_editable(ref, control):
+    pattern = control.GetPattern(uia.PatternId.ValuePattern)
+    if pattern is None:
+        return None
+    return not bool(pattern.IsReadOnly)
+
+
+def _p_password(ref, control):
+    return bool(control.IsPassword)
+
+
+_QUERY_PREDICATES = {
+    "enabled": _p_enabled,
+    "visible": _p_visible,
+    "focused": _p_focused,
+    "checked": _p_checked,
+    "expanded": _p_expanded,
+    "selected": _p_selected,
+    "editable": _p_editable,
+    "password": _p_password,
+}
+
+
+def _text_match(value, needle, exact):
+    if exact:
+        return (value or "") == needle
+    return needle.lower() in (value or "").lower()
+
+
+def _semantic_paths(root):
+    """Map (control_type, name, center_x, center_y) -> ancestor path.
+
+    The path joins the names of the semantic-tree ancestors (window,
+    containers) with " › ", giving Find results their context inside
+    the window. Informational only: on a key collision the first
+    node's path wins.
+    """
+    paths: dict[tuple, str] = {}
+
+    def walk(node, trail):
+        if getattr(node, "element_type", "") in ("interactive", "scrollable"):
+            center = getattr(node, "center", None)
+            if center is not None:
+                key = (node.control_type, node.name, center.x, center.y)
+                paths.setdefault(key, " › ".join(trail))
+        name = (getattr(node, "name", "") or "").strip()
+        child_trail = trail + [name] if name else trail
+        for child in getattr(node, "children", None) or []:
+            walk(child, child_trail)
+
+    if root is not None:
+        walk(root, [])
+    return paths
+
+
 class Desktop:
     def __init__(self):
         self.encoding = getpreferredencoding()
@@ -340,6 +508,10 @@ class Desktop:
         # Snapshot capture; refs from older snapshots stop resolving.
         self._refs_generation = 0
         self._element_refs: dict[int, ElementRef] = {}
+        # The tree state behind the current registry (issue #17): Find
+        # reads window names, centers and static text from it, so its
+        # results always describe the same capture the refs came from.
+        self._refs_tree_state = None
 
     def get_state(
         self,
@@ -1011,6 +1183,7 @@ class Desktop:
                 unique_at_capture=groups[key] == 1,
             )
         self._element_refs = refs
+        self._refs_tree_state = tree_state
         return self._refs_generation
 
     def resolve_element_ref(self, label: int, snapshot: int | None = None):
@@ -1126,6 +1299,151 @@ class Desktop:
                 "restarted since the snapshot (its creation-time token "
                 "changed) — the handle was recycled. Take a new Snapshot."
             )
+
+    # ---- Snapshot queries (issue #17) ----
+
+    # Find results are a query answer, not a capture: cap the list and
+    # report the true total so a broad query cannot flood the caller.
+    _FIND_LIMIT = 100
+
+    def find_elements(
+        self,
+        *,
+        text: str | None = None,
+        exact: bool = False,
+        role: str | None = None,
+        automation_id: str | None = None,
+        window: str | None = None,
+        snapshot: int | None = None,
+    ) -> dict:
+        """Search the current snapshot's registry without re-capturing.
+
+        Actionable matches carry their global snapshot label (the same
+        numbering the paged Snapshot output uses, #7) so they can be
+        passed straight to Invoke/SetValue/Toggle/Click. Static text
+        matches (DOM informative nodes) have no element behind them and
+        are returned separately with no label. Name substring matching
+        is case-insensitive; exact matching is a full-string,
+        case-sensitive equality.
+        """
+        if snapshot is not None and snapshot != self._refs_generation:
+            raise StaleRefError(
+                f"STALE_REF: snapshot {snapshot} was superseded; the current "
+                f"snapshot is {self._refs_generation}. Take a new Snapshot."
+            )
+        result = {
+            "generation": self._refs_generation,
+            "has_snapshot": self._refs_generation > 0,
+            "matches": [],
+            "static_matches": [],
+            "total_matches": 0,
+            "total_static": 0,
+            "truncated": False,
+        }
+        tree_state = getattr(self, "_refs_tree_state", None)
+        interactive = list(getattr(tree_state, "interactive_nodes", []) or [])
+        scrollable = list(getattr(tree_state, "scrollable_nodes", []) or [])
+        paths = _semantic_paths(getattr(tree_state, "semantic_tree_root", None))
+
+        def node_for(label):
+            if 0 <= label < len(interactive):
+                return interactive[label]
+            idx = label - len(interactive)
+            if 0 <= idx < len(scrollable):
+                return scrollable[idx]
+            return None
+
+        for label in sorted(self._element_refs):
+            ref = self._element_refs[label]
+            if role and ref.control_type.lower() != role.lower():
+                continue
+            if automation_id is not None and ref.automation_id != automation_id:
+                continue
+            if text is not None and not _text_match(ref.name, text, exact):
+                continue
+            node = node_for(label)
+            window_name = getattr(node, "window_name", "") if node else ""
+            if window and window.lower() not in window_name.lower():
+                continue
+            center = getattr(node, "center", None) if node else None
+            path = None
+            if center is not None:
+                path = paths.get(
+                    (ref.control_type, ref.name, center.x, center.y)
+                )
+            result["total_matches"] += 1
+            if len(result["matches"]) < self._FIND_LIMIT:
+                result["matches"].append(
+                    {
+                        "label": label,
+                        "control_type": ref.control_type,
+                        "name": ref.name,
+                        "automation_id": ref.automation_id,
+                        "window_name": window_name,
+                        "center": (center.x, center.y) if center else None,
+                        "path": path,
+                    }
+                )
+        if text is not None and not role and automation_id is None and not window:
+            for tnode in getattr(tree_state, "dom_informative_nodes", []) or []:
+                static_text = getattr(tnode, "text", "") or ""
+                if _text_match(static_text, text, exact):
+                    result["total_static"] += 1
+                    if len(result["static_matches"]) < self._FIND_LIMIT:
+                        result["static_matches"].append(static_text)
+        result["truncated"] = (
+            result["total_matches"] > len(result["matches"])
+            or result["total_static"] > len(result["static_matches"])
+        )
+        return result
+
+    def get_ref_property(
+        self, label: int, property_name: str, snapshot: int | None = None
+    ):
+        """Read one live property of a ref: (ref, known, value) (#17).
+
+        Resolution goes through the strict resolver (#12), so a stale
+        or ambiguous ref raises instead of returning a wrong element's
+        value. known=False means the property is not exposed or the
+        read failed — the caller reports "unknown", never a guess.
+        """
+        key = str(property_name or "").strip().lower()
+        reader = _QUERY_READERS.get(key)
+        if reader is None:
+            raise ValueError(
+                f"Unknown property {property_name!r}. Supported properties: "
+                + ", ".join(sorted(_QUERY_READERS))
+                + "."
+            )
+        ref, control = self.resolve_element_ref(label, snapshot)
+        try:
+            known, value = reader(ref, control)
+        except Exception:
+            known, value = False, None
+        return ref, known, value
+
+    def evaluate_ref_predicate(
+        self, label: int, predicate: str, snapshot: int | None = None
+    ):
+        """Evaluate one predicate on a ref: (ref, verdict) (#17).
+
+        verdict is True/False, or None when the live read cannot
+        decide (no pattern, provider error) — reported as "unknown".
+        """
+        key = str(predicate or "").strip().lower()
+        check = _QUERY_PREDICATES.get(key)
+        if check is None:
+            raise ValueError(
+                f"Unknown predicate {predicate!r}. Supported predicates: "
+                + ", ".join(sorted(_QUERY_PREDICATES))
+                + "."
+            )
+        ref, control = self.resolve_element_ref(label, snapshot)
+        try:
+            verdict = check(ref, control)
+        except Exception:
+            verdict = None
+        return ref, verdict if isinstance(verdict, bool) else None
 
     # Poll interval for the actionability battery (#16).
     _ACTIONABILITY_POLL = 0.05

@@ -117,7 +117,7 @@
     },
     {
       "name": "Scroll",
-      "description": "Scrolls at coordinates [x, y], a UI element's label/id, or current mouse position if loc=None. Type: vertical (default) or horizontal. Direction: up/down for vertical, left/right for horizontal. wheel_times controls amount (1 wheel ≈ 3-5 lines). Use for navigating long content, lists, and web pages."
+      "description": "Scrolls at coordinates [x, y], a UI element's label/id, or current mouse position if loc=None. Type: vertical (default) or horizontal. Direction: up/down for vertical, left/right for horizontal. wheel_times controls amount (1 wheel \u2248 3-5 lines). Use for navigating long content, lists, and web pages."
     },
     {
       "name": "Move",
@@ -149,7 +149,7 @@
     },
     {
       "name": "Invoke",
-      "description": "Invokes a UI element by its Snapshot ref (e.g. '@e12') via the UIA InvokePattern — no coordinates, so it lands even if the window moved. Returns STALE_REF when the element changed since the snapshot."
+      "description": "Invokes a UI element by its Snapshot ref (e.g. '@e12') via the UIA InvokePattern \u2014 no coordinates, so it lands even if the window moved. Returns STALE_REF when the element changed since the snapshot."
     },
     {
       "name": "SetValue",
@@ -158,6 +158,18 @@
     {
       "name": "Toggle",
       "description": "Toggles a checkbox or switch by its Snapshot ref via the UIA TogglePattern and reports the resulting state."
+    },
+    {
+      "name": "Find",
+      "description": "Search the most recent Snapshot's elements without taking a new capture, by name text, role (UIA control type), AutomationId or window title. Returns matching elements with their snapshot refs, window, context path and center, plus static page-text matches with no ref."
+    },
+    {
+      "name": "Get",
+      "description": "Read one live property of a Snapshot ref element (name, value, bounds, enabled, offscreen, focused, toggle_state, selected, automation_id) without a new capture. Properties that cannot be read are reported as unknown, never guessed; password values are withheld."
+    },
+    {
+      "name": "Is",
+      "description": "Evaluate one predicate (enabled, visible, focused, checked, expanded, selected, editable, password) on a Snapshot ref element from the live element, returning true, false, or unknown when the live read cannot decide."
     },
     {
       "name": "JobStatus",

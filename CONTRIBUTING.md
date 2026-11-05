@@ -183,6 +183,21 @@ uv run --extra dev ruff format .
 uv run --extra dev ruff check .
 ```
 
+## Measure First: the Findings Ledger
+
+Some behaviour this project depends on is an empirical fact about Windows,
+UIA or input delivery — not something to reason out from API documentation.
+Those measurements live in [`probes/windows/FINDINGS.md`](probes/windows/FINDINGS.md),
+one row per measurement with a stable id (`W-NNN`) and a verdict.
+
+**Before changing a role/pattern mapping, an encoding assumption, or an
+input-delivery assumption, check the ledger for the row that covers it.**
+If no row covers behaviour that matters, measure it first with a probe in
+`probes/windows/`, add the row, and only then write the fix. A row whose
+verdict is CONTRADICTS must land together with the correction to whatever
+assumed otherwise. Ref-resolution changes should also run
+`benchmarks/locator-resolution/bench_locator.py` before and after.
+
 ## Testing
 
 ### Running Tests

@@ -342,7 +342,7 @@ Follow this project on **[Trendshift](https://trendshift.io)** — the platform 
 
 ## 🤝 Contributing
 
-Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first. In short: work happens on the `main` branch, and the test suite must pass (`uv run pytest`) before a change lands.
+Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first. In short: work happens on the `main` branch, and the test suite must pass (`uv run pytest`) before a change lands. Before changing a role/pattern mapping or an input/encoding assumption, check the measured-behaviour ledger in [`probes/windows/FINDINGS.md`](probes/windows/FINDINGS.md).
 
 ## 🔒 Security
 

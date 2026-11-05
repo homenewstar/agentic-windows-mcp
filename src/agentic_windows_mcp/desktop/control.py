@@ -88,6 +88,14 @@ class ControlCoordinator:
         self.health_recovery = False
         self._recovery_handler: Callable[[], str] | None = None
         self._recovery_events: list[dict] = []
+        # Issue #25: the most recent fail-open fault — which call site
+        # fired and the exception behind it, when the caller has one —
+        # surfaced as health["last_fault"] so a latched channel names its
+        # cause instead of presenting an anonymous emergency. Written
+        # lock-free by _fail_open (hook callbacks reach it); last writer
+        # wins, and it is never cleared by recovery: it is a record of
+        # the last fault, not a current-state flag.
+        self._last_fault: dict | None = None
         self._last_recovery_at = 0.0
         self._recovery_lock = threading.Lock()
         # When the coordinator entered "unavailable" (monotonic), or None
@@ -169,7 +177,7 @@ class ControlCoordinator:
         if generation is None:
             return
         if not restored or (self._health_probe is not None and not self._health_probe()):
-            self._fail_open()
+            self._fail_open(site="resume_after_capture.health")
             return
         with self._lock:
             if generation == self._generation:
@@ -251,6 +259,11 @@ class ControlCoordinator:
             # ledger could not release (their names only, never content).
             "emergency": bool(self._emergency),
             "pending_holds": list(self.input_ledger.pending_cached()),
+            # Issue #25: the last recorded fail-open fault
+            # ({site, error, at_monotonic}), or None if no fail-open has
+            # fired in this process. Pairs with "emergency": emergency
+            # says the channel is latched, last_fault says why.
+            "last_fault": dict(self._last_fault) if self._last_fault else None,
         }
 
     def set_recovery_handler(self, handler: Callable[[], str] | None) -> None:
@@ -369,8 +382,8 @@ class ControlCoordinator:
                     return
                 try:
                     self.input_ledger.release_all()
-                except Exception:
-                    self._fail_open()
+                except Exception as exc:
+                    self._fail_open(site="notify.release_all", error=exc)
                     self._set_locked("unavailable")
                     result = self._snapshot_locked(time.monotonic())
         for listener in tuple(self._listeners):
@@ -455,8 +468,8 @@ class ControlCoordinator:
                 raise ControlBlocked(code, status)
             try:
                 self.input_ledger.enable()  # Any failed release keeps the lease closed.
-            except RuntimeError:
-                self._fail_open()
+            except RuntimeError as exc:
+                self._fail_open(site="begin_call.ledger_enable", error=exc)
                 self._set_locked("unavailable")
                 raise ControlBlocked("CONTROL_UNAVAILABLE", self._snapshot_locked(now)) from None
             # stop() may run while enable() waits for the input ledger lock.
@@ -611,7 +624,23 @@ class ControlCoordinator:
         self._quarantine.clear()
         self._thread = self._watchdog = None
 
-    def _fail_open(self) -> None:
+    def _fail_open(self, site: str = "unknown", error: BaseException | None = None) -> None:
+        # Issue #25: record the fault before latching — which call site
+        # fired and the exception summary when the caller has one — so
+        # the latch is diagnosable from ControlStatus (health.last_fault)
+        # instead of only ever presenting as an anonymous emergency.
+        # Plain attribute writes only, ahead of the existing body: hook
+        # callbacks reach this via _queue and must never wait on a lock.
+        self._last_fault = {
+            "site": site,
+            "error": f"{type(error).__name__}: {error}" if error is not None else None,
+            "at_monotonic": round(time.monotonic(), 1),
+        }
+        logger.error(
+            "Control channel fail-open (site=%s): %s",
+            site,
+            self._last_fault["error"] or "no exception supplied",
+        )
         self._fault_token = object()  # Invalidate any older successful hook installation.
         self._suppress = False
         self._deadline = 0.0
@@ -695,8 +724,8 @@ class ControlCoordinator:
         try:
             self._events.put_nowait(event)
             self._release_requested.set()  # Wake coordination without blocking the hook pump.
-        except queue.Full:
-            self._fail_open()
+        except queue.Full as exc:
+            self._fail_open(site="queue.full", error=exc)
 
     def _physical_mouse(self, code, wparam, lparam):
         return control_hooks.physical_mouse(self, code, wparam, lparam)

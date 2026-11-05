@@ -37,7 +37,7 @@ class _Owner:
         self.input_ledger = _Ledger()
         self.fail_open_calls = 0
 
-    def _fail_open(self) -> None:
+    def _fail_open(self, site: str = "unknown", error=None) -> None:
         self.fail_open_calls += 1
 
 

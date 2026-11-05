@@ -39,9 +39,9 @@ def physical_mouse(owner: Any, code: int, wparam: int, lparam: int) -> int:
         if owner._suppress and not owner._emergency:
             if time.monotonic() <= owner._deadline:
                 return 1
-            owner._fail_open()
-    except Exception:
-        owner._fail_open()
+            owner._fail_open(site="hook.mouse_deadline")
+    except Exception as exc:
+        owner._fail_open(site="hook.mouse_exception", error=exc)
     result = _user32.CallNextHookEx(owner._mouse_hook, code, wparam, lparam)
     if valid and button:
         if button[1]:
@@ -99,9 +99,9 @@ def physical_key(owner: Any, code: int, wparam: int, lparam: int) -> int:
         if owner._suppress and not owner._emergency:
             if time.monotonic() <= owner._deadline:
                 return 1
-            owner._fail_open()
-    except Exception:
-        owner._fail_open()
+            owner._fail_open(site="hook.key_deadline")
+    except Exception as exc:
+        owner._fail_open(site="hook.key_exception", error=exc)
     result = _user32.CallNextHookEx(owner._key_hook, code, wparam, lparam)
     if vk is not None and not mode_switch:
         if down:

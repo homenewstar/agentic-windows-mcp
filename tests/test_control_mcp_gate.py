@@ -412,7 +412,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         def stop(self):
             self.state = "unavailable"
 
-        def _fail_open(self):
+        def _fail_open(self, site="unknown", error=None):
             self.fail_count += 1
 
         def set_health_probe(self, probe):

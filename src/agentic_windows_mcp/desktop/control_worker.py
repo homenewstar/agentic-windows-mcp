@@ -1,8 +1,12 @@
 """State coordination and hold cleanup, never on the Win32 hook pump."""
 
+import logging
 import queue
 import time
 from typing import Any, Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 def refresh_deadline(owner: Any, now: float, fault=None) -> None:
@@ -18,7 +22,7 @@ def refresh_deadline(owner: Any, now: float, fault=None) -> None:
         )
 
     if not owner._lock.acquire(blocking=False):
-        owner._fail_open()
+        owner._fail_open(site="refresh_deadline.lock_busy")
         return
     try:
         if current() and owner._state == "ai" and owner._visual_armed and not owner._fast_takeover:
@@ -78,13 +82,18 @@ def run_control_worker(owner: Any, interactive_desktop: Callable[[], bool]) -> N
                 or not owner._thread.is_alive()
                 or now - owner._thread_beat > 1.0
             ):
-                owner._fail_open()
+                owner._fail_open(site="worker.health_check")
                 owner._mark_unavailable()
                 continue
             if owner._emergency and can_recover:
                 owner._recover_after_rehook(fault, healthy=True, sampled_at=now)
             if not owner._emergency:
                 refresh_deadline(owner, now, fault)
-        except Exception:
-            owner._fail_open()
+        except Exception as exc:
+            # Issue #25: never swallow the fault that tripped the latch.
+            # Log it with its traceback and record it on the coordinator
+            # so ControlStatus (health.last_fault) names the exact site
+            # and exception instead of an anonymous emergency.
+            logger.exception("Control worker loop fault; failing open")
+            owner._fail_open(site="worker.loop_exception", error=exc)
             owner._mark_unavailable()

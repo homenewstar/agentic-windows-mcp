@@ -266,8 +266,8 @@ def run_input_monitor(owner: Any) -> None:
         if message == 0x00FF:  # WM_INPUT
             try:
                 owner._raw_input(lparam)
-            except Exception:
-                owner._fail_open()
+            except Exception as exc:
+                owner._fail_open(site="win32.raw_input", error=exc)
         return _user32.DefWindowProcW(hwnd, message, wparam, lparam)
 
     owner._window_callback = window_proc
@@ -322,7 +322,7 @@ def run_input_monitor(owner: Any) -> None:
             )
     except Exception as exc:
         owner._startup_error = exc
-        owner._fail_open()
+        owner._fail_open(site="win32.monitor_run", error=exc)
         owner._ready.set()
     finally:
         owner._suppress = False

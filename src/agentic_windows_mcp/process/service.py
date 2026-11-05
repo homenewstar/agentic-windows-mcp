@@ -1,7 +1,38 @@
 from typing import Literal
 
 
-__all__ = ["list_processes", "kill_process"]
+__all__ = ["list_processes", "kill_process", "PROTECTED_PROCESSES", "protected_process_refusal"]
+
+
+# Session-critical Windows images that must never be terminated through
+# this tooling (issue #22). Killing explorer.exe breaks the user's
+# desktop session outright; the rest are core session/system processes.
+# Most are additionally shielded by the OS (privilege/PPL), but the
+# guard's job is a clear refusal at the point of action rather than a
+# bare AccessDenied after an attempt. Matching is the EXACT image name,
+# case-insensitive — a program whose name merely contains a protected
+# name (explorer-notes.exe) is a different, closable process.
+PROTECTED_PROCESSES = frozenset(
+    {
+        "explorer.exe",
+        "csrss.exe",
+        "smss.exe",
+        "winlogon.exe",
+        "wininit.exe",
+        "dwm.exe",
+    }
+)
+
+
+def protected_process_refusal(image_name: str | None) -> str | None:
+    """The refusal message when image_name is protected, else None."""
+    if image_name and image_name.lower() in PROTECTED_PROCESSES:
+        return (
+            f"Error: PROTECTED_PROCESS: {image_name} is a protected "
+            "session-critical process and must not be terminated — "
+            "killing it would break the user's desktop session."
+        )
+    return None
 
 
 def list_processes(
@@ -55,11 +86,19 @@ def kill_process(
 
     if pid is None and name is None:
         return "Error: Provide either pid or name parameter for kill mode."
+    if name is not None:
+        # Refuse a protected target before enumerating anything (#22).
+        refusal = protected_process_refusal(name)
+        if refusal is not None:
+            return refusal
     killed = []
     if pid is not None:
         try:
             p = psutil.Process(pid)
             pname = p.name()
+            refusal = protected_process_refusal(pname)
+            if refusal is not None:
+                return refusal
             if force:
                 p.kill()
             else:

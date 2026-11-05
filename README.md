@@ -359,6 +359,10 @@ Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) fir
 
 Windows blocks input from a lower-integrity process to a higher-integrity window (e.g. an app running as administrator) — and `SendInput` reports success anyway, so the injection count is never proof of delivery (findings ledger W-002 in `probes/windows/FINDINGS.md`). Before sending physical input or a UIA pattern write, the server compares token integrity levels and fails closed with a `PERM_DENIED` error when the target process outranks it, sending nothing. To drive an elevated app, run the server itself elevated to the same level. Observation (Snapshot, screenshots) of elevated windows is unaffected.
 
+## 🛡️ Protected processes
+
+Terminating the wrong process breaks the user's desktop session, so the process-kill path refuses a protected list of session-critical images outright, before any termination attempt: `explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`. The refusal is a typed `PROTECTED_PROCESS` error and is enforced in the shared kill path, so every consumer (the Process tool today, any future one) behaves identically. Matching is the **exact image name**, case-insensitive — never a substring — so a lookalike app such as `explorer-notes.exe` remains closable.
+
 ## 🎯 Action results: delivery & retry dispositions
 
 Every action tool (Click, Type, Scroll, Move, Shortcut, MultiSelect, MultiEdit, Invoke, SetValue, Toggle, PowerShell) ends its result with a machine-readable disposition, and every failure from those tools ends with a typed error envelope:

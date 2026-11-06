@@ -34,6 +34,16 @@ class TestClassify:
         assert (disp.delivery, disp.retry) == ("not_delivered", "safe")
         assert recovery == "refresh_snapshot_then_retry_original"
 
+    def test_uia_capture_failed_prefix(self):
+        # Issue #33: a read-path capture failure delivered no input, so
+        # it is not_delivered/safe with the snapshot-refresh recovery.
+        code, disp, recovery = classify_error(
+            RuntimeError("UIA_CAPTURE_FAILED: drill-down capture failed")
+        )
+        assert code == "UIA_CAPTURE_FAILED"
+        assert (disp.delivery, disp.retry) == ("not_delivered", "safe")
+        assert recovery == "refresh_snapshot_then_retry_original"
+
     def test_perm_denied_prefix(self):
         code, disp, _ = classify_error(
             PermissionError("PERM_DENIED: target runs higher (findings W-002)")

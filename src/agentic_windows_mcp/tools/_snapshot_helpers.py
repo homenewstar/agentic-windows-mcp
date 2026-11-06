@@ -14,8 +14,9 @@ from datetime import datetime
 from fastmcp.utilities.types import Image
 from textwrap import dedent
 from agentic_windows_mcp.desktop.frame_tracking import FRAMES
-from agentic_windows_mcp.desktop.service import Desktop, Size
+from agentic_windows_mcp.desktop.service import Desktop, Size, StaleRefError
 from agentic_windows_mcp.desktop.utils import remove_private_use_chars, repair_surrogates
+from agentic_windows_mcp.uia import UIADeadElementError, UIAException
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,32 @@ def _as_region(value: list | str | None) -> list | None:
 
 
 DEFAULT_PAGE_SIZE = 500
+
+
+def _capture_subtree_state(desktop: Desktop, root_control, root_window_handle):
+    """Run the drill-down subtree capture, translating UIA failures.
+
+    The tree service already converts raw COM errors into typed
+    UIAExceptions (issue #33); this layer gives the Snapshot caller the
+    #13 vocabulary: a root the provider reports unavailable means the
+    ref's element is gone (closed, re-rendered, or virtualized after
+    the snapshot), which is STALE_REF semantics — refresh and retry;
+    any other UIA failure is a capture failure at a named stage, and a
+    read-only capture is always safe to retry after a fresh snapshot.
+    """
+    try:
+        return desktop.tree.get_subtree_state(root_control, root_window_handle)
+    except UIADeadElementError as e:
+        raise StaleRefError(
+            "STALE_REF: the drill-down root element is no longer available "
+            f"({e}) — it was closed, re-rendered, or virtualized after the "
+            "snapshot was taken. Take a new Snapshot and drill down again."
+        ) from e
+    except UIAException as e:
+        raise RuntimeError(
+            "UIA_CAPTURE_FAILED: the drill-down subtree capture failed at "
+            f"the UIA layer ({e}). Take a new Snapshot and try again."
+        ) from e
 
 
 def _capture_desktop_state_once(
@@ -102,8 +129,8 @@ def _capture_desktop_state_once(
         # Drill-down (#18): capture only the ref element's subtree; the
         # rest of the desktop state (screenshot, windows) is captured as
         # usual around it.
-        subtree_state = desktop.tree.get_subtree_state(
-            root_control, root_window_handle
+        subtree_state = _capture_subtree_state(
+            desktop, root_control, root_window_handle
         )
 
     desktop_state = desktop.get_state(

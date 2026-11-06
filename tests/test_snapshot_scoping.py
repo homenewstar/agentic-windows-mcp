@@ -8,6 +8,7 @@ completeness verdict those markers feed.
 """
 
 import sys
+from _ctypes import COMError
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -28,7 +29,12 @@ from agentic_windows_mcp.tree.views import (
     TreeState,
     _prune_structural,
 )
-from agentic_windows_mcp.uia import Rect
+from agentic_windows_mcp.tools._snapshot_helpers import _capture_subtree_state
+from agentic_windows_mcp.uia import (
+    Rect,
+    UIADeadElementError,
+    UIANotSupportedError,
+)
 
 
 def _node(name, runtime_id, *, window_handle=4242):
@@ -262,3 +268,120 @@ class TestSubtreeCapture:
         assert state.semantic_tree_root.name == "Panel"
         assert state.interactive_nodes == []
         assert state.is_complete() is True
+
+    def test_drill_down_walks_the_roots_children(
+        self, tree_instance, monkeypatch
+    ):
+        group = _fake_group(2)
+        group.Name = "Panel"
+        group.LocalizedControlType = "group"
+        group.BoundingRectangle = Rect(0, 0, 200, 200)
+        children = {id(group): group._children}
+        _subtree_rig(monkeypatch)
+        monkeypatch.setattr(
+            "agentic_windows_mcp.tree.service.CachedControlHelper.get_cached_children",
+            lambda node, cache_request: children.get(id(node), []),
+        )
+        monkeypatch.setattr(
+            "agentic_windows_mcp.tree.service.random_point_within_bounding_box",
+            lambda node, scale_factor: (60, 35),
+        )
+        monkeypatch.setattr(
+            "agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"}
+        )
+        state = tree_instance.get_subtree_state(group, 4242)
+        assert [node.name for node in state.interactive_nodes] == ["B0", "B1"]
+        assert state.root_node.name == "Panel"
+        assert state.is_complete() is True
+
+
+def _subtree_rig(monkeypatch):
+    monkeypatch.setattr(
+        "agentic_windows_mcp.tree.service.ControlFromHandle",
+        lambda handle: SimpleNamespace(Name="Win"),
+    )
+    monkeypatch.setattr(
+        "agentic_windows_mcp.tree.service.CacheRequestFactory",
+        SimpleNamespace(
+            create_tree_traversal_cache=lambda: SimpleNamespace(TreeScope=0)
+        ),
+    )
+
+
+class _RootWithFailingBounds:
+    """A drill-down root whose live bounds read fails the way the live
+    PC's Notepad document element did in issue #33."""
+
+    def __init__(self, error):
+        self._error = error
+        self.Name = "Panel"
+        self.LocalizedControlType = "group"
+
+    @property
+    def BoundingRectangle(self):
+        raise self._error
+
+
+class TestSubtreeCaptureFailures:
+    """Issue #33: get_subtree_state converts raw COM failures into the
+    typed UIA exceptions, exactly like get_nodes does for a window."""
+
+    def test_unavailable_root_becomes_typed_dead_element_error(
+        self, tree_instance, monkeypatch
+    ):
+        _subtree_rig(monkeypatch)
+        root = _RootWithFailingBounds(
+            COMError(
+                -2147220991,
+                "An event was unable to invoke any of the subscribers",
+                (None, None, None, 0, None),
+            )
+        )
+        with pytest.raises(UIADeadElementError) as excinfo:
+            tree_instance.get_subtree_state(root, 4242)
+        # The raw COMError must not escape: the typed exception carries
+        # the UIA code instead (0x80040201 = UIA_E_ELEMENTNOTAVAILABLE).
+        assert not isinstance(excinfo.value, COMError)
+        assert excinfo.value.code == -2147220991
+
+    def test_other_com_failure_becomes_its_typed_error(
+        self, tree_instance, monkeypatch
+    ):
+        _subtree_rig(monkeypatch)
+        root = _RootWithFailingBounds(
+            COMError(-2147220988, "not supported", (None, None, None, 0, None))
+        )
+        with pytest.raises(UIANotSupportedError):
+            tree_instance.get_subtree_state(root, 4242)
+
+
+class TestSubtreeCaptureTranslation:
+    """Issue #33: the snapshot helper translates typed UIA failures
+    into the #13 message vocabulary (STALE_REF / UIA_CAPTURE_FAILED)."""
+
+    def _desktop(self, side_effect=None, result=None):
+        def get_subtree_state(root, handle):
+            if side_effect is not None:
+                raise side_effect
+            return result
+
+        return SimpleNamespace(
+            tree=SimpleNamespace(get_subtree_state=get_subtree_state)
+        )
+
+    def test_success_passes_through(self):
+        sentinel = object()
+        desktop = self._desktop(result=sentinel)
+        assert _capture_subtree_state(desktop, object(), 4242) is sentinel
+
+    def test_dead_element_becomes_stale_ref(self):
+        desktop = self._desktop(side_effect=UIADeadElementError(-2147220991, None))
+        with pytest.raises(desktop_service.StaleRefError) as excinfo:
+            _capture_subtree_state(desktop, object(), 4242)
+        assert str(excinfo.value).startswith("STALE_REF:")
+
+    def test_other_uia_failure_becomes_capture_failed(self):
+        desktop = self._desktop(side_effect=UIANotSupportedError(-2147220988, None))
+        with pytest.raises(RuntimeError) as excinfo:
+            _capture_subtree_state(desktop, object(), 4242)
+        assert str(excinfo.value).startswith("UIA_CAPTURE_FAILED:")

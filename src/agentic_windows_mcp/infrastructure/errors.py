@@ -66,6 +66,15 @@ _PREFIX_RULES = (
     ("UNSUPPORTED_PATTERN:", "ACTION_NOT_SUPPORTED", NOT_DELIVERED, None),
     ("NOT_EDITABLE:", "ACTION_NOT_SUPPORTED", NOT_DELIVERED, None),
     ("AMBIGUOUS_TARGET:", "AMBIGUOUS_TARGET", NOT_DELIVERED, None),
+    # A read-path UIA capture failed at the provider layer (issue #33).
+    # A capture sends no input, so nothing was delivered and re-running
+    # it after a fresh snapshot is safe.
+    (
+        "UIA_CAPTURE_FAILED:",
+        "UIA_CAPTURE_FAILED",
+        NOT_DELIVERED,
+        "refresh_snapshot_then_retry_original",
+    ),
     # A multi-event sequence delivered its input but the release of a
     # held button/key could not be confirmed (#23): the action landed,
     # the desktop may be poisoned — never retry blind.

@@ -1135,7 +1135,31 @@ class Tree:
         AutomationId, window handle) as a full capture and their refs can
         extend the parent snapshot's registry. The browser/DOM path is not
         entered: a drill-down observes the native UIA subtree.
+
+        COM failures are converted with from_com_error before they leave
+        this method — the same treatment get_nodes gives a whole window
+        (issue #33). The drill path previously had no conversion at all:
+        the root element is re-acquired live (not born cached like the
+        elements of a window capture), so when the provider reports it
+        unavailable — UIA_E_ELEMENTNOTAVAILABLE, 0x80040201, the code
+        whose shared message text reads "An event was unable to invoke
+        any of the subscribers" — the raw COMError escaped the tree
+        service untouched. Callers now always see a typed UIAException.
         """
+        try:
+            return self._get_subtree_state(root_control, window_handle)
+        except COMError as e:
+            uia_exc = from_com_error(e)
+            if isinstance(uia_exc, UIADeadElementError):
+                logger.debug(
+                    "Drill-down root is no longer available (dead element): %s",
+                    uia_exc,
+                )
+            else:
+                logger.error("UIA error in drill-down capture: %s", uia_exc)
+            raise uia_exc from e
+
+    def _get_subtree_state(self, root_control, window_handle: int) -> TreeState:
         self.dom = None
         self.dom_bounding_box = None
         self.dom_is_ia2 = False

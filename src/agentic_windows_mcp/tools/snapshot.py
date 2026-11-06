@@ -10,7 +10,11 @@ from agentic_windows_mcp.desktop.image_post import (
     process_screenshot,
     validate_screenshot_options,
 )
+from _ctypes import COMError
+
 from agentic_windows_mcp.desktop.service import AmbiguousRefError, StaleRefError
+from agentic_windows_mcp.infrastructure.errors import classify_error, error_suffix
+from agentic_windows_mcp.uia import UIADeadElementError, from_com_error
 from agentic_windows_mcp.tools._snapshot_helpers import (
     _as_bool,
     _as_region,
@@ -119,7 +123,36 @@ def register(mcp, *, get_desktop, get_analytics):
             try:
                 ref, root_control = get_desktop().resolve_element_ref(label)
             except (StaleRefError, AmbiguousRefError) as e:
-                raise ValueError(str(e)) from e
+                code, disposition, recovery = classify_error(e)
+                raise ValueError(
+                    str(e) + error_suffix(code, disposition, recovery)
+                ) from e
+            except COMError as e:
+                # Re-acquisition walks the live window (issue #33): a raw
+                # COM failure here must reach the caller as the typed
+                # envelope, never as a naked COM tuple. An unavailable
+                # element is STALE_REF semantics; anything else is a
+                # capture-stage failure — both are reads, so a retry
+                # after a fresh snapshot is safe.
+                uia_exc = from_com_error(e)
+                if isinstance(uia_exc, UIADeadElementError):
+                    message = (
+                        "STALE_REF: the element behind "
+                        f"@e{label} is no longer available ({uia_exc}) — "
+                        "it was closed, re-rendered, or virtualized after "
+                        "the snapshot was taken. Take a new Snapshot and "
+                        "drill down again."
+                    )
+                else:
+                    message = (
+                        "UIA_CAPTURE_FAILED: resolving the drill-down ref "
+                        f"@e{label} failed at the UIA layer ({uia_exc}). "
+                        "Take a new Snapshot and try again."
+                    )
+                code, disposition, recovery = classify_error(ValueError(message))
+                raise ValueError(
+                    message + error_suffix(code, disposition, recovery)
+                ) from e
             root_window_handle = ref.window_handle
             extend_refs = True
             capture_note = (
@@ -182,7 +215,15 @@ def register(mcp, *, get_desktop, get_analytics):
                 use_dom if 'use_dom' in locals() else None,
                 exc_info=True,
             )
-            return [f'Error capturing desktop state: {str(e)}. Please try again.']
+            # The failure text carries the typed envelope (issue #13), so
+            # a caller can branch on code/disposition/retry instead of
+            # parsing prose — a raw COM tuple must never be the whole
+            # answer (issue #33).
+            code, disposition, recovery = classify_error(e)
+            return [
+                f'Error capturing desktop state: {str(e)}.'
+                + error_suffix(code, disposition, recovery)
+            ]
 
         return build_snapshot_response(capture_result, include_ui_details=True)
 

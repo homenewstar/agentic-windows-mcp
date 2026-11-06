@@ -45,9 +45,18 @@ def refresh_deadline(owner: Any, now: float, fault=None) -> None:
         owner._lock.release()
 
 
+# Issue #35: a single unhealthy probe sample must not latch the channel.
+# On a saturated host the coordinator's threads can be starved for seconds;
+# only a *sustained* failure proves the channel is really wedged. Input
+# suppression is not extended by this grace: refresh_deadline is skipped
+# while unhealthy, so suppression still lapses on its own 1 s deadline.
+_UNHEALTHY_GRACE_SECONDS = 10.0
+
+
 def run_control_worker(owner: Any, interactive_desktop: Callable[[], bool]) -> None:
     """Reuse the watchdog for ordered events; throttle expensive health probes."""
     next_health = 0.0
+    unhealthy_since: float | None = None
     while True:
         owner._release_requested.wait(0.01)
         owner._release_requested.clear()
@@ -85,6 +94,16 @@ def run_control_worker(owner: Any, interactive_desktop: Callable[[], bool]) -> N
                 or not owner._thread.is_alive()
                 or now - owner._thread_beat > 1.0
             ):
+                if not owner._emergency:
+                    # Issue #35: absorb transient load stalls. The grace
+                    # clock starts at the first unhealthy sample; a healthy
+                    # sample (below) resets it. An already-latched emergency
+                    # keeps the immediate fail-open behaviour.
+                    if unhealthy_since is None:
+                        unhealthy_since = now
+                    if now - unhealthy_since < _UNHEALTHY_GRACE_SECONDS:
+                        continue
+                    unhealthy_since = None
                 # Issue #26: this site fired live with error null twice —
                 # it is a condition fault, so record the measured
                 # conditions (and the probe's own explanation, which can
@@ -106,11 +125,13 @@ def run_control_worker(owner: Any, interactive_desktop: Callable[[], bool]) -> N
                 beat_age = now - owner._thread_beat
                 if beat_age > 1.0:
                     reasons.append(f"monitor beat stale ({beat_age:.1f}s old)")
+                unhealthy_since = None
                 owner._fail_open(
                     site="worker.health_check", detail="; ".join(reasons)
                 )
                 owner._mark_unavailable()
                 continue
+            unhealthy_since = None
             if owner._emergency and can_recover:
                 owner._recover_after_rehook(fault, healthy=True, sampled_at=now)
             if not owner._emergency:

@@ -356,3 +356,39 @@ def test_cleanup_waiting_for_ledger_does_not_block_injected_callback(monkeypatch
             owner._release_requested.set()
     worker.join(1)
     assert not worker.is_alive()
+
+
+def _recording_fail_open(monkeypatch, owner, clock):
+    latches = []
+    original = owner._fail_open
+
+    def record(site="unknown", error=None, detail=None):
+        latches.append((clock[0], site))
+        return original(site=site, error=error, detail=detail)
+
+    monkeypatch.setattr(owner, "_fail_open", record)
+    return latches
+
+
+def test_transient_unhealthy_probe_does_not_fail_open(monkeypatch):
+    # Issue #35: a probe that fails for ~2 s under load and then recovers
+    # must not latch the channel (live 2026-11-06: one 2.8 s-old indicator
+    # heartbeat sample took the channel down mid-meeting).
+    owner, clock, _ = worker_fixture(monkeypatch, limit=400)
+    latches = _recording_fail_open(monkeypatch, owner, clock)
+    owner._health_probe = lambda: clock[0] >= 102.0
+    control_worker.run_control_worker(owner, lambda: True)
+    assert latches == []
+    assert not owner._emergency
+
+
+def test_sustained_unhealthy_probe_fails_open_only_after_grace(monkeypatch):
+    # The grace absorbs transients, not real wedges: a probe that never
+    # recovers still latches, at the first sample past the grace window.
+    owner, clock, _ = worker_fixture(monkeypatch, limit=1600)
+    latches = _recording_fail_open(monkeypatch, owner, clock)
+    owner._health_probe = lambda: False
+    control_worker.run_control_worker(owner, lambda: True)
+    health_latches = [t for t, site in latches if site == "worker.health_check"]
+    assert health_latches, "sustained failure must still latch"
+    assert health_latches[0] >= 100.0 + control_worker._UNHEALTHY_GRACE_SECONDS

@@ -94,13 +94,31 @@ def test_alive_but_stalled_indicator_reports_unhealthy(monkeypatch):
         thread = threading.current_thread()  # still alive, but no heartbeat refresh
         stopping = False
         error = None
-        heartbeat = time.monotonic() - 2.0
+        heartbeat = time.monotonic() - 6.0
 
         def stop(self):
             pass
 
     monkeypatch.setattr(control_overlay, "_instance", StalledIndicator())
     assert control_overlay.is_healthy() is False
+
+
+def test_load_delayed_indicator_heartbeat_reports_healthy(monkeypatch):
+    # Issue #35: the exact live reading from 2026-11-06 — a 2.8 s-old
+    # heartbeat on a CPU-saturated host is scheduling jitter, not a dead
+    # indicator, and must not latch the control channel.
+    class DelayedIndicator:
+        thread = threading.current_thread()
+        stopping = False
+        error = None
+        heartbeat = time.monotonic() - 2.8
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(control_overlay, "_instance", DelayedIndicator())
+    assert control_overlay.is_healthy() is True
+    assert control_overlay.health_detail() is None
 
 
 def test_capture_ack_timeout_cannot_hide_recovered_indicator(monkeypatch):
@@ -173,6 +191,9 @@ def test_actual_owner_thread_stall_expires_heartbeat(monkeypatch):
         raise RuntimeError("simulated window owner failure")
 
     monkeypatch.setattr(control_overlay, "_monitor_rects", stalled_monitor_lookup)
+    # Issue #35 widened the production window to 5 s; shrink it here so the
+    # stall-expiry behaviour stays covered without a 5 s sleep.
+    monkeypatch.setattr(control_overlay, "_HEARTBEAT_FRESH_SECONDS", 1.0)
     control_overlay.start()
     indicator = control_overlay._instance
     assert indicator is not None

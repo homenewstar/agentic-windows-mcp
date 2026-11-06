@@ -12,7 +12,7 @@ constraints = [{ name = "pydantic-settings", specifier = ">=2.14.2" }]
 
 [[package]]
 name = "agentic-windows-mcp"
-version = "0.9.3"
+version = "0.9.4"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

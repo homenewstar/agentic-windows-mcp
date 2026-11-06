@@ -27,6 +27,13 @@ from agentic_windows_mcp import uia
 logger = logging.getLogger(__name__)
 
 _REFRESH_SECONDS = 0.05
+# Load tolerance (issue #35): on a saturated small-core host the display
+# thread can legitimately go seconds between loop iterations, so the
+# freshness and acknowledgement windows must absorb scheduling jitter.
+# They stay finite on purpose: a genuinely dead indicator still trips
+# them, and the sticky error in change() remains the last-resort guard.
+_HEARTBEAT_FRESH_SECONDS = 5.0
+_ACK_TIMEOUT_SECONDS = 10.0
 _SW_HIDE = 0
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
 _BLUE = (45, 145, 255)
@@ -210,6 +217,26 @@ def _build_layers(
         raise
 
 
+def _raise_thread_priority() -> None:
+    """Best effort: keep the display thread schedulable on a saturated host.
+
+    The thread does a few Win32 calls per 50 ms loop; at default priority a
+    CPU-hogging workload can starve it for seconds, which the health probe
+    then reads as a dead indicator (issue #35). Failing to raise priority
+    is not fatal — the wider health windows still apply.
+    """
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenThread(0x0020, False, threading.get_native_id())
+        if handle:
+            try:
+                kernel32.SetThreadPriority(handle, 1)  # THREAD_PRIORITY_ABOVE_NORMAL
+            finally:
+                kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+
+
 class _Indicator:
     def __init__(self) -> None:
         self.condition = threading.Condition()
@@ -273,7 +300,7 @@ class _Indicator:
                     or self.error is not None
                     or not self.thread.is_alive()
                 ),
-                timeout=3.0,
+                timeout=_ACK_TIMEOUT_SECONDS,
             ):
                 # The owner may later recover and apply this hidden state.
                 # Make the failure sticky so health checks can never grant a
@@ -297,6 +324,7 @@ class _Indicator:
             raise RuntimeError("AI control indicator did not stop")
 
     def _run(self) -> None:
+        _raise_thread_priority()
         layers: list[_Layer] = []
         ring: _Layer | None = None
         rects: tuple[tuple[int, int, int, int], ...] = ()
@@ -467,7 +495,7 @@ def set_pending(pending: bool, *, generation: int | None = None) -> bool:
 
 
 def is_healthy() -> bool:
-    """Reject an alive but stalled window owner after one second."""
+    """Reject an alive but stalled window owner (see issue #35 for the window)."""
     with _lock:
         indicator = _instance
     return bool(
@@ -475,7 +503,7 @@ def is_healthy() -> bool:
         and indicator.thread.is_alive()
         and not indicator.stopping
         and indicator.error is None
-        and 0 <= time.monotonic() - indicator.heartbeat <= 1.0
+        and 0 <= time.monotonic() - indicator.heartbeat <= _HEARTBEAT_FRESH_SECONDS
     )
 
 
@@ -502,7 +530,7 @@ def health_detail() -> str | None:
     if indicator.stopping:
         return "indicator stopping"
     age = time.monotonic() - indicator.heartbeat
-    if not 0 <= age <= 1.0:
+    if not 0 <= age <= _HEARTBEAT_FRESH_SECONDS:
         return f"indicator heartbeat stale ({age:.1f}s old)"
     return None
 

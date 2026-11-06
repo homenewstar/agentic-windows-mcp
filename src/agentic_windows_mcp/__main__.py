@@ -1018,12 +1018,25 @@ def _gen_tls(host: str, cert_path, key_path) -> None:
 
 _TASK_NAME = "agentic-windows-mcp-server"
 _START_SCRIPT_PATH = CONFIG_DIR / "start-server.cmd"
-_LAUNCHER_SCRIPT_PATH = CONFIG_DIR / "start-server.ps1"
-_VERSION_FILE_PATH = CONFIG_DIR / "version.txt"
 # Supported interpreter tags for the launcher probe (#32), newest first.
 # The package requires Python >= 3.12; the launcher never trusts a path
 # merely existing — every candidate is run and must import the package.
 _LAUNCHER_PY_TAGS = ("3.14", "3.13", "3.12")
+
+
+def _launcher_script_path():
+    """Where install writes the probing launcher (#32).
+
+    Derived from CONFIG_DIR at call time, not frozen at import, so a
+    relocated config dir (and tests that relocate it) gets its launcher
+    beside its config.
+    """
+    return CONFIG_DIR / "start-server.ps1"
+
+
+def _version_file_path():
+    """Where install records the package version for the launcher (#32)."""
+    return CONFIG_DIR / "version.txt"
 
 
 def _resolve_program() -> list[str]:
@@ -1169,7 +1182,7 @@ def _build_start_script(transport: str, host: str, port: int) -> str:
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(_LAUNCHER_SCRIPT_PATH),
+            str(_launcher_script_path()),
             "-Transport",
             transport,
             "-BindHost",
@@ -1271,10 +1284,10 @@ def install(transport: str, host: str, port: int, force: bool) -> None:
     # interpreter; start-server.ps1 probes for a working one at every
     # start, and version.txt records what the rebuild path must
     # reinstall if every interpreter loses the package.
-    _LAUNCHER_SCRIPT_PATH.write_text(_launcher_script(), encoding="utf-8")
+    _launcher_script_path().write_text(_launcher_script(), encoding="utf-8")
     version = _package_version()
     if version:
-        _VERSION_FILE_PATH.write_text(version + "\n", encoding="utf-8")
+        _version_file_path().write_text(version + "\n", encoding="utf-8")
     _START_SCRIPT_PATH.write_text(
         _build_start_script(transport, host, port), encoding="utf-8"
     )
@@ -1298,7 +1311,7 @@ def install(transport: str, host: str, port: int, force: bool) -> None:
     click.echo(f"  Task      : {_TASK_NAME}")
     click.echo(f"  Transport : {transport}")
     click.echo(f"  Address   : {host}:{port}")
-    click.echo(f"  Launcher  : {_LAUNCHER_SCRIPT_PATH} (probes for a working Python >= 3.12 at every start)")
+    click.echo(f"  Launcher  : {_launcher_script_path()} (probes for a working Python >= 3.12 at every start)")
     click.echo(f"  Logs      : {CONFIG_DIR / 'server.log'}")
     click.echo("\nThe server will restart automatically at every login.")
     click.echo("Run `agentic-windows-mcp uninstall` to remove it.")
@@ -1321,13 +1334,13 @@ def uninstall() -> None:
         _START_SCRIPT_PATH.unlink()
         click.echo(f"Removed {_START_SCRIPT_PATH}")
 
-    if _LAUNCHER_SCRIPT_PATH.exists():
-        _LAUNCHER_SCRIPT_PATH.unlink()
-        click.echo(f"Removed {_LAUNCHER_SCRIPT_PATH}")
+    if _launcher_script_path().exists():
+        _launcher_script_path().unlink()
+        click.echo(f"Removed {_launcher_script_path()}")
 
-    if _VERSION_FILE_PATH.exists():
-        _VERSION_FILE_PATH.unlink()
-        click.echo(f"Removed {_VERSION_FILE_PATH}")
+    if _version_file_path().exists():
+        _version_file_path().unlink()
+        click.echo(f"Removed {_version_file_path()}")
 
     click.echo("agentic-windows-mcp will no longer start at login.")
 

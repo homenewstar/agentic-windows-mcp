@@ -82,7 +82,6 @@ class TestStartScript:
         self, monkeypatch, tmp_path: Path
     ):
         monkeypatch.setattr(cli, "CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(cli, "_LAUNCHER_SCRIPT_PATH", tmp_path / "start-server.ps1")
         cmd = cli._build_start_script("streamable-http", "0.0.0.0", 8000)
         assert cmd.startswith("@echo off")
         assert "powershell.exe" in cmd
@@ -95,7 +94,6 @@ class TestStartScript:
 
     def test_cmd_contains_no_interpreter_path(self, monkeypatch, tmp_path: Path):
         monkeypatch.setattr(cli, "CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(cli, "_LAUNCHER_SCRIPT_PATH", tmp_path / "start-server.ps1")
         cmd = cli._build_start_script("sse", "127.0.0.1", 9000)
         assert "python.exe" not in cmd
         assert "python" not in cmd.lower().replace("powershell.exe", "")

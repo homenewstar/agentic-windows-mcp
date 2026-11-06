@@ -54,9 +54,11 @@ def test_install_options_are_not_blocked_by_legacy_filter(monkeypatch, tmp_path)
 
     assert result.exit_code == 0, result.output
     assert "Scheduled task installed" in result.output
-    assert "agentic-windows-mcp serve --transport sse" in (tmp_path / "start-server.cmd").read_text(
-        encoding="utf-8"
-    )
+    # #32: the .cmd delegates to the probing launcher with the serve
+    # parameters instead of naming an interpreter inline.
+    cmd_text = (tmp_path / "start-server.cmd").read_text(encoding="utf-8")
+    assert "powershell.exe" in cmd_text
+    assert "-Transport sse" in cmd_text
 
 
 def test_group_help_still_renders():

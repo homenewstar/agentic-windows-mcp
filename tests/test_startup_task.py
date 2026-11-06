@@ -22,9 +22,7 @@ def test_install_writes_start_script_and_creates_task(
     start_script = tmp_path / "start server.cmd"
     monkeypatch.setattr(cli, "_START_SCRIPT_PATH", start_script)
     launcher_script = tmp_path / "start-server.ps1"
-    monkeypatch.setattr(cli, "_LAUNCHER_SCRIPT_PATH", launcher_script)
     version_file = tmp_path / "version.txt"
-    monkeypatch.setattr(cli, "_VERSION_FILE_PATH", version_file)
     monkeypatch.setattr(cli, "_package_version", lambda: "0.9.3")
     monkeypatch.setattr(cli.sys, "executable", "C:\\Program Files\\Python\\python.exe")
 
@@ -84,8 +82,7 @@ def test_uninstall_removes_task_and_wrapper(monkeypatch, tmp_path):
     version_file.write_text("0.9.3\n", encoding="utf-8")
 
     monkeypatch.setattr(cli, "_START_SCRIPT_PATH", start_script)
-    monkeypatch.setattr(cli, "_LAUNCHER_SCRIPT_PATH", launcher_script)
-    monkeypatch.setattr(cli, "_VERSION_FILE_PATH", version_file)
+    monkeypatch.setattr(cli, "CONFIG_DIR", tmp_path)
 
     calls = []
 

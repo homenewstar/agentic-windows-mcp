@@ -21,6 +21,11 @@ def test_install_writes_start_script_and_creates_task(
     monkeypatch.setattr(cli, "CONFIG_DIR", tmp_path)
     start_script = tmp_path / "start server.cmd"
     monkeypatch.setattr(cli, "_START_SCRIPT_PATH", start_script)
+    launcher_script = tmp_path / "start-server.ps1"
+    monkeypatch.setattr(cli, "_LAUNCHER_SCRIPT_PATH", launcher_script)
+    version_file = tmp_path / "version.txt"
+    monkeypatch.setattr(cli, "_VERSION_FILE_PATH", version_file)
+    monkeypatch.setattr(cli, "_package_version", lambda: "0.9.3")
     monkeypatch.setattr(cli.sys, "executable", "C:\\Program Files\\Python\\python.exe")
 
     calls: list[tuple[str, ...]] = []
@@ -51,12 +56,20 @@ def test_install_writes_start_script_and_creates_task(
 
     assert result.exit_code == 0, result.output
     script = start_script.read_text(encoding="utf-8")
-    assert (
-        '"C:\\Program Files\\Python\\python.exe" -m agentic_windows_mcp serve --transport sse '
-        "--host 127.0.0.1 --port 9000"
-    ) in script
+    # #32: the .cmd names no interpreter — it delegates to the probing
+    # launcher with the serve parameters, keeping the same log files.
+    assert "powershell.exe" in script
+    assert str(launcher_script) in script
+    assert "-Transport sse" in script
+    assert "-BindHost 127.0.0.1" in script
+    assert "-Port 9000" in script
+    assert "C:\\Program Files\\Python\\python.exe" not in script
     assert '1>>"' in script
     assert '2>>"' in script
+    # The launcher and the recorded version land beside the .cmd.
+    assert launcher_script.exists()
+    assert "import agentic_windows_mcp" in launcher_script.read_text(encoding="utf-8")
+    assert version_file.read_text(encoding="utf-8").strip() == "0.9.3"
     assert registrations == [(cli._TASK_NAME, str(start_script))]
     assert ("/Run", "/TN", cli._TASK_NAME) in calls
 
@@ -65,8 +78,14 @@ def test_uninstall_removes_task_and_wrapper(monkeypatch, tmp_path):
     runner = CliRunner()
     start_script = tmp_path / "start-server.cmd"
     start_script.write_text("@echo off\n", encoding="utf-8")
+    launcher_script = tmp_path / "start-server.ps1"
+    launcher_script.write_text("# launcher\n", encoding="utf-8")
+    version_file = tmp_path / "version.txt"
+    version_file.write_text("0.9.3\n", encoding="utf-8")
 
     monkeypatch.setattr(cli, "_START_SCRIPT_PATH", start_script)
+    monkeypatch.setattr(cli, "_LAUNCHER_SCRIPT_PATH", launcher_script)
+    monkeypatch.setattr(cli, "_VERSION_FILE_PATH", version_file)
 
     calls = []
 
@@ -82,5 +101,7 @@ def test_uninstall_removes_task_and_wrapper(monkeypatch, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert not start_script.exists()
+    assert not launcher_script.exists()
+    assert not version_file.exists()
     assert ("/End", "/TN", cli._TASK_NAME) in calls
     assert ("/Delete", "/TN", cli._TASK_NAME, "/F") in calls

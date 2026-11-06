@@ -290,7 +290,10 @@ class TestSubtreeCapture:
             "agentic_windows_mcp.tree.service.AccessibleRoleNames", {43: "PushButton"}
         )
         state = tree_instance.get_subtree_state(group, 4242)
-        assert [node.name for node in state.interactive_nodes] == ["B0", "B1"]
+        # The native walk visits children right-to-left; the flat node
+        # list keeps traversal order (only the semantic tree is
+        # re-ordered), so compare the walked set, not the sequence.
+        assert sorted(node.name for node in state.interactive_nodes) == ["B0", "B1"]
         assert state.root_node.name == "Panel"
         assert state.is_complete() is True
 

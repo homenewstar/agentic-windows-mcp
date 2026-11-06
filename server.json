@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "agentic-windows-mcp",
-      "version": "0.9.1",
+      "version": "0.9.2",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

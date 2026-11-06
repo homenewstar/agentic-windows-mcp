@@ -2891,6 +2891,11 @@ class Desktop:
         clipped_box = self._clip_bounding_box_to_region(node.bounding_box, region)
         if clipped_box is None:
             return None
+        # Identity evidence must survive the rebuild (#34): a region is
+        # applied to every window-scoped capture (the #28 crop) and to
+        # explicit region captures, and dropping runtime_id/window_handle
+        # here minted refs that could never be re-acquired — the scoped
+        # tree was readable but no ref tool could act on it.
         return TreeElementNode(
             name=node.name,
             control_type=node.control_type,
@@ -2898,6 +2903,8 @@ class Desktop:
             bounding_box=clipped_box,
             center=clipped_box.get_center(),
             metadata=node.metadata,
+            runtime_id=node.runtime_id,
+            window_handle=node.window_handle,
         )
 
     def _filter_scroll_node_to_region(self, node, region: BoundingBox):
@@ -2911,6 +2918,8 @@ class Desktop:
             bounding_box=clipped_box,
             center=clipped_box.get_center(),
             metadata=node.metadata,
+            runtime_id=node.runtime_id,
+            window_handle=node.window_handle,
         )
 
     def _filter_semantic_node_to_region(

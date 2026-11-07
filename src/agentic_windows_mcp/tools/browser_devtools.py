@@ -4,11 +4,36 @@ Enables agents to scrape complex web pages, dissect HTML/CSS structures, test UI
 and debug frontend network/console logs like chrome-devtools-mcp directly on the user's running browser.
 """
 
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
+import functools
 import json
 
 from mcp.types import ToolAnnotations
 from agentic_windows_mcp.browser.devtools_manager import BrowserDevToolsManager
+from agentic_windows_mcp.infrastructure.analytics import with_analytics
+from agentic_windows_mcp.infrastructure.errors import enveloped
+
+
+def _typed_errors(func):
+    """Append the #13 typed envelope to errors raised by a Browser tool (#37 D1).
+
+    Deliberately NOT infrastructure.errors.with_disposition: that
+    decorator also appends a prose suffix to *successful* results,
+    and Browser payloads are JSON documents a suffix would corrupt.
+    Successes pass through byte-identical; failures are rebuilt via
+    enveloped() so BROWSER_NOT_DEBUGGABLE / ELEMENT_NOT_FOUND /
+    DRIVER_DEAD etc. reach the agent as typed [error code=...]
+    instead of a bare RuntimeError.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as exc:
+            raise enveloped(exc) from exc
+
+    return wrapper
 
 
 def register(mcp, *, get_desktop, get_analytics):
@@ -25,6 +50,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_Connect-Tool")
+    @_typed_errors
     async def browser_connect(cdp_url: Optional[str] = None) -> str:
         res = await manager.connect_or_launch(cdp_url=cdp_url)
         return json.dumps(res, indent=2, ensure_ascii=False)
@@ -40,6 +67,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_Navigate-Tool")
+    @_typed_errors
     async def browser_navigate(
         url: str,
         wait_until: str = "load",
@@ -60,6 +89,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetPageSnapshot-Tool")
+    @_typed_errors
     async def browser_get_page_snapshot(
         selector: Optional[str] = None,
         format_type: str = "clean_html",
@@ -80,6 +111,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetCssStyles-Tool")
+    @_typed_errors
     async def browser_get_css_styles(
         selector: str,
         properties: Optional[List[str]] = None,
@@ -102,6 +135,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetComputedStyle-Tool")
+    @_typed_errors
     async def browser_get_computed_style(
         selector: str,
         include_pseudo: bool = True,
@@ -127,6 +162,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_Highlight-Tool")
+    @_typed_errors
     async def browser_highlight(
         selector: str,
         color: str = "#ef4444",
@@ -154,6 +191,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_EvaluateScript-Tool")
+    @_typed_errors
     async def browser_evaluate_script(
         script: str,
         arg: Optional[Any] = None,
@@ -173,6 +212,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_QueryElements-Tool")
+    @_typed_errors
     async def browser_query_elements(
         selector: str,
         attributes: Optional[List[str]] = None,
@@ -191,7 +232,9 @@ def register(mcp, *, get_desktop, get_analytics):
             "'drag' (hold the left button and move: from a selector's center or start_x/start_y, either straight to "
             "target_x/target_y or through 'waypoints' [[x, y], ...] for multi-segment paths like swipes and scratching; "
             "hold_ms presses in place before moving, step_delay_ms paces the movement), "
-            "'hold' (press and hold the left button at a selector or start_x/start_y for hold_ms, then release). Supports target page_id."
+            "'hold' (press and hold the left button at a selector or start_x/start_y for hold_ms, then release). Supports target page_id. "
+            "timeout_ms bounds click/fill/hover: if the element never appears you get ELEMENT_NOT_FOUND, "
+            "if it appears but stays unusable you get ELEMENT_NOT_ACTIONABLE."
         ),
         annotations=ToolAnnotations(
             title="Browser Interact",
@@ -201,8 +244,21 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_Interact-Tool")
+    @_typed_errors
     async def browser_interact(
-        action: str,
+        action: Literal[
+            "click",
+            "right_click",
+            "double_click",
+            "hover",
+            "hover_and_wait",
+            "fill",
+            "press_key",
+            "wait_for",
+            "drag",
+            "hold",
+        ],
         selector: Optional[str] = None,
         value: Optional[str] = None,
         key: Optional[str] = None,
@@ -222,27 +278,27 @@ def register(mcp, *, get_desktop, get_analytics):
         if act == "click":
             if not selector:
                 raise ValueError("Selector required for 'click'")
-            res = await manager.click(selector=selector, button="left", click_count=1, page_id=page_id)
+            res = await manager.click(selector=selector, button="left", click_count=1, page_id=page_id, timeout_ms=timeout_ms)
         elif act == "right_click":
             if not selector:
                 raise ValueError("Selector required for 'right_click'")
-            res = await manager.click(selector=selector, button="right", click_count=1, page_id=page_id)
+            res = await manager.click(selector=selector, button="right", click_count=1, page_id=page_id, timeout_ms=timeout_ms)
         elif act == "double_click":
             if not selector:
                 raise ValueError("Selector required for 'double_click'")
-            res = await manager.click(selector=selector, button="left", click_count=2, page_id=page_id)
+            res = await manager.click(selector=selector, button="left", click_count=2, page_id=page_id, timeout_ms=timeout_ms)
         elif act == "hover":
             if not selector:
                 raise ValueError("Selector required for 'hover'")
-            res = await manager.hover(selector=selector, delay_ms=0, page_id=page_id)
+            res = await manager.hover(selector=selector, delay_ms=0, page_id=page_id, timeout_ms=timeout_ms)
         elif act == "hover_and_wait":
             if not selector:
                 raise ValueError("Selector required for 'hover_and_wait'")
-            res = await manager.hover(selector=selector, delay_ms=delay_ms, page_id=page_id)
+            res = await manager.hover(selector=selector, delay_ms=delay_ms, page_id=page_id, timeout_ms=timeout_ms)
         elif act == "fill":
             if not selector or value is None:
                 raise ValueError("Selector and value required for 'fill'")
-            res = await manager.fill(selector=selector, value=value, page_id=page_id)
+            res = await manager.fill(selector=selector, value=value, page_id=page_id, timeout_ms=timeout_ms)
         elif act == "press_key":
             if not key:
                 raise ValueError("Key required for 'press_key'")
@@ -277,6 +333,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_TakeScreenshot-Tool")
+    @_typed_errors
     async def browser_take_screenshot(
         selector: Optional[str] = None,
         full_page: bool = False,
@@ -302,6 +360,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_ListNetworkRequests-Tool")
+    @_typed_errors
     async def browser_list_network_requests(
         filter_url: Optional[str] = None,
         resource_type: Optional[str] = None,
@@ -333,6 +393,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetNetworkDetails-Tool")
+    @_typed_errors
     async def browser_get_network_details(
         request_id_or_url: str,
         include_body: bool = True,
@@ -358,6 +420,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_ListConsoleMessages-Tool")
+    @_typed_errors
     async def browser_list_console_messages(
         level: Optional[str] = None,
         limit: int = 50,
@@ -377,6 +441,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_ManageTabs-Tool")
+    @_typed_errors
     async def browser_manage_tabs(
         action: str = "list",
         page_id: Optional[int] = None,
@@ -413,6 +479,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetStorage-Tool")
+    @_typed_errors
     async def browser_get_storage(
         types: Optional[List[str]] = None,
         page_id: Optional[int] = None,
@@ -435,6 +503,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetMatchedStyles-Tool")
+    @_typed_errors
     async def browser_get_matched_styles(
         selector: str,
         page_id: Optional[int] = None,
@@ -458,6 +528,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetAccessibilityTree-Tool")
+    @_typed_errors
     async def browser_get_accessibility_tree(
         max_depth: int = 30,
         page_id: Optional[int] = None,
@@ -483,6 +555,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_ListPageSources-Tool")
+    @_typed_errors
     async def browser_list_page_sources(
         filter_text: Optional[str] = None,
         page_id: Optional[int] = None,
@@ -504,6 +578,8 @@ def register(mcp, *, get_desktop, get_analytics):
             openWorldHint=True,
         ),
     )
+    @with_analytics(get_analytics(), "Browser_GetSourceText-Tool")
+    @_typed_errors
     async def browser_get_source_text(
         source_id: str,
         kind: str = "script",

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import logging
 import os
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 import json as _json
 from bs4 import BeautifulSoup
@@ -17,6 +18,7 @@ from playwright.async_api import (
     Playwright,
     Request,
     Response,
+    TimeoutError as PlaywrightTimeoutError,
     async_playwright,
 )
 
@@ -24,6 +26,14 @@ from agentic_windows_mcp.browser.consent import (
     ConsentDialogMonitor,
     detect_consent_dialog,
     should_retry_attach,
+)
+from agentic_windows_mcp.browser.errors import (
+    ConsentPendingError,
+    DriverDeadError,
+    ElementNotActionableError,
+    ElementNotFoundError,
+    NotDebuggableError,
+    is_driver_death,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,28 +215,135 @@ class CdpNetworkTracker:
         return None
 
 
-def resolve_user_browser_endpoint() -> Optional[str]:
-    """Auto-detect the WebSocket CDP endpoint from the user's currently running browser (Chrome, Edge, Brave)."""
-    candidates = [
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\DevToolsActivePort"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\DevToolsActivePort"),
-        os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\DevToolsActivePort"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome SxS\User Data\DevToolsActivePort"),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    port = f.readline().strip()
-                    ws_path = f.readline().strip()
-                if port and ws_path:
-                    endpoint = f"ws://127.0.0.1:{port}{ws_path}"
-                    logger.info("Found active browser DevTools endpoint from %s: %s", path, endpoint)
-                    return endpoint
-            except Exception as e:
-                logger.debug("Failed reading %s: %s", path, e)
+# ---------------------------------------------------------------------------
+# CDP endpoint discovery (#37, defects D2/D3)
+#
+# A DevToolsActivePort file is only a *hint*: it outlives the browser that
+# wrote it, and the ws path it names dies with that browser session (a stale
+# GUID was trusted and refused on the old test PC). Discovery therefore
+# probes every candidate with a short /json/version request before trusting
+# it, prefers the LIVE webSocketDebuggerUrl the probe returns over the
+# file's recorded path, and falls through to the next candidate on any
+# refusal. The report lines say what discovery actually found, so the
+# BROWSER_NOT_DEBUGGABLE error can distinguish "no browser", "browser
+# without debugging" and "stale file" instead of failing blind.
+DEVTOOLS_PORT_FILES: Tuple[Tuple[str, str], ...] = (
+    ("Chrome", r"%LOCALAPPDATA%\Google\Chrome\User Data\DevToolsActivePort"),
+    ("Edge", r"%LOCALAPPDATA%\Microsoft\Edge\User Data\DevToolsActivePort"),
+    ("Brave", r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\DevToolsActivePort"),
+    ("Chrome SxS", r"%LOCALAPPDATA%\Google\Chrome SxS\User Data\DevToolsActivePort"),
+)
+FALLBACK_CDP_HTTP = "http://127.0.0.1:9222"
+FALLBACK_CDP_PORT = 9222
+PROBE_TIMEOUT_SECONDS = 1.5
+# A failed discovery is remembered for this long: repeated Browser_* calls
+# inside the window fail fast with the same typed error instead of paying
+# a full attach attempt each (the census recorded 14 identical refusals
+# across 3 tools in 2 days).
+DISCOVERY_NEGATIVE_CACHE_TTL_SECONDS = 45.0
+DEFAULT_INTERACT_TIMEOUT_MS = 10_000
 
-    return "http://127.0.0.1:9222"
+
+def _read_devtools_port_file(path: str) -> Optional[Tuple[int, str]]:
+    """Parse a DevToolsActivePort file into (port, ws_path), or None."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            port = f.readline().strip()
+            ws_path = f.readline().strip()
+        if port and ws_path:
+            return int(port), ws_path
+    except Exception as e:
+        logger.debug("Failed reading %s: %s", path, e)
+    return None
+
+
+def probe_devtools_version(
+    port: int, timeout: float = PROBE_TIMEOUT_SECONDS
+) -> Tuple[str, Optional[dict]]:
+    """Probe ``GET /json/version`` on 127.0.0.1:<port> (sync; call via to_thread).
+
+    Returns (outcome, payload): outcome is "ok", "refused", "timeout",
+    "invalid-json", "http-<status>" or "error-<type>". A live DevTools
+    HTTP endpoint answers on the same port the ws endpoint lives on, so
+    one probe validates both reachability and freshness.
+    """
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        conn.request("GET", "/json/version")
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return (f"http-{resp.status}", None)
+        try:
+            payload = _json.loads(resp.read().decode("utf-8", "replace"))
+        except ValueError:
+            return ("invalid-json", None)
+        return ("ok", payload if isinstance(payload, dict) else {})
+    except ConnectionRefusedError:
+        return ("refused", None)
+    except TimeoutError:
+        return ("timeout", None)
+    except OSError as e:
+        return (f"error-{type(e).__name__}", None)
+    finally:
+        conn.close()
+
+
+async def discover_user_browser_endpoint(
+    probe: Callable[..., Tuple[str, Optional[dict]]] = probe_devtools_version,
+) -> Tuple[Optional[str], List[str]]:
+    """Probe the discovery candidates in order.
+
+    Returns (endpoint, report): the first endpoint whose probe answered,
+    or (None, report) when nothing did. The report has one human line
+    per candidate tried — it is attached verbatim to the
+    BROWSER_NOT_DEBUGGABLE error so the failure is diagnosable.
+    """
+    report: List[str] = []
+    for name, raw_path in DEVTOOLS_PORT_FILES:
+        path = os.path.expandvars(raw_path)
+        parsed = _read_devtools_port_file(path) if os.path.isfile(path) else None
+        if parsed is None:
+            report.append(f"{name}: no DevToolsActivePort file")
+            continue
+        port, ws_path = parsed
+        outcome, payload = await asyncio.to_thread(probe, port)
+        if outcome == "ok":
+            file_endpoint = f"ws://127.0.0.1:{port}{ws_path}"
+            live_endpoint = (payload or {}).get("webSocketDebuggerUrl")
+            if live_endpoint and live_endpoint != file_endpoint:
+                report.append(
+                    f"{name}: port {port} answered /json/version; the file's "
+                    "ws path was stale, using the live endpoint"
+                )
+                return live_endpoint, report
+            report.append(f"{name}: port {port} answered /json/version")
+            return file_endpoint, report
+        report.append(
+            f"{name}: DevToolsActivePort names port {port} but the probe "
+            f"outcome was {outcome} (stale file, or debugging is off)"
+        )
+    outcome, _payload = await asyncio.to_thread(probe, FALLBACK_CDP_PORT)
+    if outcome == "ok":
+        report.append(f"fallback {FALLBACK_CDP_HTTP} answered /json/version")
+        return FALLBACK_CDP_HTTP, report
+    report.append(f"fallback {FALLBACK_CDP_HTTP} probe outcome was {outcome}")
+    return None, report
+
+
+def resolve_user_browser_endpoint() -> Optional[str]:
+    """Best *unprobed* candidate: first port-file endpoint, else the 9222
+    fallback. Kept for compatibility — the connect path uses
+    discover_user_browser_endpoint(), which probes before trusting (#37)."""
+    for _name, raw_path in DEVTOOLS_PORT_FILES:
+        path = os.path.expandvars(raw_path)
+        if os.path.isfile(path):
+            parsed = _read_devtools_port_file(path)
+            if parsed is not None:
+                port, ws_path = parsed
+                endpoint = f"ws://127.0.0.1:{port}{ws_path}"
+                logger.info("Found active browser DevTools endpoint from %s: %s", path, endpoint)
+                return endpoint
+    return FALLBACK_CDP_HTTP
 
 
 def find_system_browser_executable() -> Optional[str]:
@@ -256,6 +373,13 @@ class BrowserDevToolsManager:
         self.pages: List[Page] = []
         self.active_page_index: int = 0
         self.connected_endpoint: Optional[str] = None
+
+        # #37 (D3): negative cache for a failed discovery — the detail
+        # text of the last BROWSER_NOT_DEBUGGABLE failure and when it
+        # happened. Repeat auto-connects inside the TTL re-raise it
+        # immediately instead of re-running discovery + attach.
+        self._neg_cache_at: float = 0.0
+        self._neg_cache_detail: Optional[str] = None
 
         # Diagnostic ring buffers
         self.console_logs: List[Dict[str, Any]] = []
@@ -305,6 +429,53 @@ class BrowserDevToolsManager:
     async def _init_playwright(self) -> None:
         if self.playwright is None:
             self.playwright = await async_playwright().start()
+
+    async def _reset_driver_internal(self) -> None:
+        """Drop every driver reference so _init_playwright restarts it.
+
+        Runs on the worker loop. The old driver is stopped best-effort:
+        it may already be half-dead, and stop() itself can hang — bound
+        it and swallow it either way.
+        """
+        old = self.playwright
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.pages = []
+        self.active_page_index = 0
+        self.connected_endpoint = None
+        self._cdp_sessions = {}
+        self._monitored_page_ids = set()
+        if old is not None:
+            try:
+                await asyncio.wait_for(old.stop(), timeout=5.0)
+            except Exception as exc:
+                logger.warning("stopping the dead driver raised %r; continuing reset", exc)
+
+    async def _invoke(self, factory: Callable[[], Any]) -> Any:
+        """Run one public operation with a single driver reset on death (#37 D5).
+
+        *factory* is a zero-arg callable returning the coroutine to run,
+        so the retry gets a fresh coroutine. A driver-death error resets
+        the manager and retries exactly once; a second death surfaces as
+        the typed DRIVER_DEAD. Any other error propagates untouched.
+        """
+        try:
+            return await self._run_in_worker(factory())
+        except Exception as exc:
+            if not is_driver_death(exc):
+                raise
+            logger.warning("Playwright driver died (%s); resetting once", exc)
+        try:
+            await self._run_in_worker(self._reset_driver_internal())
+            return await self._run_in_worker(factory())
+        except Exception as exc:
+            if is_driver_death(exc):
+                raise DriverDeadError(
+                    "the Playwright driver died and the automatic reset "
+                    f"did not revive it ({exc})"
+                ) from exc
+            raise
 
     def _attach_page_listeners(self, page: Page) -> None:
         pid = id(page)
@@ -445,6 +616,22 @@ class BrowserDevToolsManager:
             except Exception:
                 pass
 
+    def _negative_cache_hit(self) -> Optional[str]:
+        """The cached not-debuggable detail, while it is still fresh (#37 D3)."""
+        if self._neg_cache_detail is None:
+            return None
+        if time.monotonic() - self._neg_cache_at < DISCOVERY_NEGATIVE_CACHE_TTL_SECONDS:
+            return self._neg_cache_detail
+        return None
+
+    def _remember_discovery_failure(self, detail: str) -> None:
+        self._neg_cache_at = time.monotonic()
+        self._neg_cache_detail = detail
+
+    async def _discover_endpoint(self) -> Tuple[Optional[str], List[str]]:
+        """Discovery seam (module-level probe + report); tests replace it."""
+        return await discover_user_browser_endpoint()
+
     async def _connect_to_user_browser_internal(self, custom_endpoint: Optional[str] = None) -> Dict[str, Any]:
         await self._init_playwright()
 
@@ -458,17 +645,44 @@ class BrowserDevToolsManager:
                 "active_tab": await self._get_active_tab_summary(),
             }
 
-        endpoint = custom_endpoint or resolve_user_browser_endpoint()
-        if not endpoint:
-            raise RuntimeError("No user browser DevTools endpoint found.")
+        if custom_endpoint:
+            # The caller named the endpoint: discovery and its negative
+            # cache do not apply.
+            return await self._attach(custom_endpoint, ["explicit endpoint (discovery skipped)"])
 
+        cached = self._negative_cache_hit()
+        if cached is not None:
+            raise NotDebuggableError(cached)
+
+        endpoint, report = await self._discover_endpoint()
+        if endpoint is None:
+            detail = (
+                "no debuggable browser endpoint answered. Discovery: "
+                + "; ".join(report)
+                + ". Remote debugging must be enabled in the user's browser "
+                "(chrome://inspect/#remote-debugging); no browser was launched "
+                "(attach-only by design)."
+            )
+            self._remember_discovery_failure(detail)
+            raise NotDebuggableError(detail)
+
+        try:
+            result = await self._attach(endpoint, report)
+        except NotDebuggableError as exc:
+            self._remember_discovery_failure(exc.detail)
+            raise
+        self._neg_cache_at = 0.0
+        self._neg_cache_detail = None
+        return result
+
+    async def _attach(self, endpoint: str, report: List[str]) -> Dict[str, Any]:
         logger.info("Connecting to user browser at %s", endpoint)
         # While Chrome's remote-debugging consent dialog is on screen the
         # handshake stalls until the user clicks Allow (the dialog monitor
         # releases the input for them, held 10s per sighting). Retry up to
         # 3 attempts while the dialog explains the stall; if the user
-        # still has not approved, surface CONSENT_PENDING so the agent can
-        # ask them in chat and wait for their confirmation there.
+        # still has not approved, surface BROWSER_CONSENT_PENDING so the
+        # agent can ask them in chat and wait for their confirmation there.
         saw_dialog = False
         last_error: Optional[Exception] = None
         for attempt in range(1, 4):
@@ -481,6 +695,11 @@ class BrowserDevToolsManager:
                 last_error = None
                 break
             except Exception as e:
+                if is_driver_death(e):
+                    # Not an attach refusal: the driver itself is gone.
+                    # Let the caller's reset-once recovery (#37 D5) see
+                    # it instead of masking it as not-debuggable.
+                    raise
                 last_error = e
                 await asyncio.sleep(2)
                 present = detect_consent_dialog()
@@ -495,18 +714,21 @@ class BrowserDevToolsManager:
                 await asyncio.sleep(3)
         if last_error is not None:
             if saw_dialog:
-                raise RuntimeError(
-                    "CONSENT_PENDING: Chrome's remote-debugging consent "
-                    "dialog is on screen and the user has not approved it "
-                    "after 3 attach attempts. Ask the user to click "
-                    "'Allow' on the dialog, then retry."
+                raise ConsentPendingError(
+                    "Chrome's remote-debugging consent dialog is on screen "
+                    "and the user has not approved it after 3 attach "
+                    "attempts. Ask the user to click 'Allow' on the "
+                    "dialog, then retry."
                 ) from last_error
             # Owner's rule: never launch a browser -- only attach to the
             # one the user already has open. Report and stop instead.
-            raise RuntimeError(
-                f"Could not connect to the user's already-open browser ({last_error}). "
-                f"Remote debugging must be enabled in that browser instance "
-                f"(chrome://inspect/#remote-debugging); no browser was launched."
+            raise NotDebuggableError(
+                f"the discovered endpoint {endpoint} refused the CDP "
+                f"attach ({last_error}). Discovery: "
+                + "; ".join(report)
+                + ". Remote debugging must be enabled in that browser "
+                "instance (chrome://inspect/#remote-debugging); no "
+                "browser was launched."
             ) from last_error
 
         contexts = self.browser.contexts
@@ -691,7 +913,7 @@ class BrowserDevToolsManager:
         """
         result = await self._safe_evaluate(page, script, {"selector": selector, "props": target_props})
         if not result:
-            raise ValueError(f"Element matching selector '{selector}' was not found.")
+            raise ElementNotFoundError(f"no element matching selector '{selector}'")
         return result
 
     async def _get_advanced_computed_styles_internal(
@@ -807,7 +1029,7 @@ class BrowserDevToolsManager:
             "includeAnimations": include_animations,
         })
         if not result:
-            raise ValueError(f"Element matching selector '{selector}' was not found.")
+            raise ElementNotFoundError(f"no element matching selector '{selector}'")
         return result
 
     async def _highlight_element_internal(
@@ -870,7 +1092,7 @@ class BrowserDevToolsManager:
             "scrollIntoView": scroll_into_view,
         })
         if not result:
-            raise ValueError(f"Element matching selector '{selector}' was not found.")
+            raise ElementNotFoundError(f"no element matching selector '{selector}'")
         return result
 
     async def _evaluate_script_internal(self, script: str, arg: Any = None, page_id: Optional[int] = None) -> Any:
@@ -910,9 +1132,34 @@ class BrowserDevToolsManager:
         """
         return await self._safe_evaluate(page, script, {"selector": selector, "attrList": attr_list, "limit": limit})
 
-    async def _click_internal(self, selector: str, button: str = "left", click_count: int = 1, page_id: Optional[int] = None) -> Dict[str, Any]:
+    async def _await_attached(self, page: Page, selector: str, timeout_ms: int):
+        """Bounded presence pre-check (#37 D4).
+
+        Returns the first matching locator once it is attached to the
+        DOM; a locator that never appears within timeout_ms raises the
+        typed ELEMENT_NOT_FOUND instead of surfacing Playwright's bare
+        30s timeout.
+        """
+        locator = page.locator(selector).first
+        try:
+            await locator.wait_for(state="attached", timeout=timeout_ms)
+        except PlaywrightTimeoutError as exc:
+            raise ElementNotFoundError(
+                f"no element matching selector '{selector}' appeared "
+                f"within {timeout_ms}ms"
+            ) from exc
+        return locator
+
+    async def _click_internal(self, selector: str, button: str = "left", click_count: int = 1, page_id: Optional[int] = None, timeout_ms: int = DEFAULT_INTERACT_TIMEOUT_MS) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
-        await page.click(selector, button=button, click_count=click_count)
+        locator = await self._await_attached(page, selector, timeout_ms)
+        try:
+            await locator.click(button=button, click_count=click_count, timeout=timeout_ms)
+        except PlaywrightTimeoutError as exc:
+            raise ElementNotActionableError(
+                f"element matching selector '{selector}' was attached but "
+                f"not clickable within {timeout_ms}ms"
+            ) from exc
         return {
             "action": "click",
             "button": button,
@@ -922,14 +1169,28 @@ class BrowserDevToolsManager:
             "target": "user_active_browser_tab",
         }
 
-    async def _fill_internal(self, selector: str, value: str, page_id: Optional[int] = None) -> Dict[str, Any]:
+    async def _fill_internal(self, selector: str, value: str, page_id: Optional[int] = None, timeout_ms: int = DEFAULT_INTERACT_TIMEOUT_MS) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
-        await page.fill(selector, value)
+        locator = await self._await_attached(page, selector, timeout_ms)
+        try:
+            await locator.fill(value, timeout=timeout_ms)
+        except PlaywrightTimeoutError as exc:
+            raise ElementNotActionableError(
+                f"element matching selector '{selector}' was attached but "
+                f"not fillable within {timeout_ms}ms"
+            ) from exc
         return {"action": "fill", "selector": selector, "value_length": len(value), "status": "success"}
 
-    async def _hover_internal(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
+    async def _hover_internal(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None, timeout_ms: int = DEFAULT_INTERACT_TIMEOUT_MS) -> Dict[str, Any]:
         page = await self._get_page_by_id_or_active(page_id)
-        await page.hover(selector)
+        locator = await self._await_attached(page, selector, timeout_ms)
+        try:
+            await locator.hover(timeout=timeout_ms)
+        except PlaywrightTimeoutError as exc:
+            raise ElementNotActionableError(
+                f"element matching selector '{selector}' was attached but "
+                f"not hoverable within {timeout_ms}ms"
+            ) from exc
         if delay_ms > 0:
             await asyncio.sleep(delay_ms / 1000.0)
         return {"action": "hover", "selector": selector, "waited_ms": delay_ms, "status": "success"}
@@ -1094,72 +1355,79 @@ class BrowserDevToolsManager:
 
     async def _close_internal(self) -> None:
         if self.playwright:
-            await self.playwright.stop()
+            try:
+                await self.playwright.stop()
+            except Exception as exc:
+                # A half-dead driver must not make close() itself fail.
+                logger.warning("stopping the driver during close raised %r; ignored", exc)
             self.playwright = None
             self.browser = None
             self.context = None
             self.pages.clear()
 
-    # Public asynchronous API (bridged to Proactor worker)
+    # Public asynchronous API (bridged to Proactor worker). Every entry
+    # point routes through _invoke so a dead Playwright driver is reset
+    # and retried once per incident (#37 D5); close() is the exception —
+    # it talks to the possibly-dead driver directly and tolerates it.
     async def connect_or_launch(self, cdp_url: Optional[str] = None, headless: bool = False, browser_type: str = "chromium") -> Dict[str, Any]:
-        return await self._run_in_worker(self._connect_to_user_browser_internal(cdp_url))
+        return await self._invoke(lambda: self._connect_to_user_browser_internal(cdp_url))
 
     async def navigate(self, url: str, wait_until: str = "load", timeout_ms: int = 30000, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._navigate_internal(url, wait_until, timeout_ms, page_id))
+        return await self._invoke(lambda: self._navigate_internal(url, wait_until, timeout_ms, page_id))
 
     async def get_page_snapshot(self, selector: Optional[str] = None, format_type: str = "clean_html", max_length: int = 15000, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._get_page_snapshot_internal(selector, format_type, max_length, page_id))
+        return await self._invoke(lambda: self._get_page_snapshot_internal(selector, format_type, max_length, page_id))
 
     async def get_css_styles(self, selector: str, properties: Optional[List[str]] = None, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._get_css_styles_internal(selector, properties, page_id))
+        return await self._invoke(lambda: self._get_css_styles_internal(selector, properties, page_id))
 
     async def get_advanced_computed_styles(self, selector: str, include_pseudo: bool = True, include_animations: bool = True, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._get_advanced_computed_styles_internal(selector, include_pseudo, include_animations, page_id))
+        return await self._invoke(lambda: self._get_advanced_computed_styles_internal(selector, include_pseudo, include_animations, page_id))
 
     async def highlight_element(self, selector: str, color: str = "#ef4444", duration_ms: int = 5000, scroll_into_view: bool = True, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._highlight_element_internal(selector, color, duration_ms, scroll_into_view, page_id))
+        return await self._invoke(lambda: self._highlight_element_internal(selector, color, duration_ms, scroll_into_view, page_id))
 
     async def evaluate_script(self, script: str, arg: Any = None, page_id: Optional[int] = None) -> Any:
-        return await self._run_in_worker(self._evaluate_script_internal(script, arg, page_id))
+        return await self._invoke(lambda: self._evaluate_script_internal(script, arg, page_id))
 
     async def query_elements(self, selector: str, attributes: Optional[List[str]] = None, limit: int = 50, page_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        return await self._run_in_worker(self._query_elements_internal(selector, attributes, limit, page_id))
+        return await self._invoke(lambda: self._query_elements_internal(selector, attributes, limit, page_id))
 
-    async def click(self, selector: str, button: str = "left", click_count: int = 1, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._click_internal(selector, button, click_count, page_id))
+    async def click(self, selector: str, button: str = "left", click_count: int = 1, page_id: Optional[int] = None, timeout_ms: int = DEFAULT_INTERACT_TIMEOUT_MS) -> Dict[str, Any]:
+        return await self._invoke(lambda: self._click_internal(selector, button, click_count, page_id, timeout_ms))
 
-    async def fill(self, selector: str, value: str, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._fill_internal(selector, value, page_id))
+    async def fill(self, selector: str, value: str, page_id: Optional[int] = None, timeout_ms: int = DEFAULT_INTERACT_TIMEOUT_MS) -> Dict[str, Any]:
+        return await self._invoke(lambda: self._fill_internal(selector, value, page_id, timeout_ms))
 
-    async def hover(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._hover_internal(selector, delay_ms, page_id))
+    async def hover(self, selector: str, delay_ms: int = 0, page_id: Optional[int] = None, timeout_ms: int = DEFAULT_INTERACT_TIMEOUT_MS) -> Dict[str, Any]:
+        return await self._invoke(lambda: self._hover_internal(selector, delay_ms, page_id, timeout_ms))
 
     async def drag(self, selector: Optional[str] = None, target_x: Optional[float] = None, target_y: Optional[float] = None, steps: int = 20, step_delay_ms: int = 0, hold_ms: int = 0, page_id: Optional[int] = None, waypoints: Optional[List] = None, start_x: Optional[float] = None, start_y: Optional[float] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._drag_internal(selector=selector, target_x=target_x, target_y=target_y, steps=steps, step_delay_ms=step_delay_ms, hold_ms=hold_ms, page_id=page_id, waypoints=waypoints, start_x=start_x, start_y=start_y))
+        return await self._invoke(lambda: self._drag_internal(selector=selector, target_x=target_x, target_y=target_y, steps=steps, step_delay_ms=step_delay_ms, hold_ms=hold_ms, page_id=page_id, waypoints=waypoints, start_x=start_x, start_y=start_y))
 
     async def hold(self, selector: Optional[str] = None, hold_ms: int = 1000, page_id: Optional[int] = None, start_x: Optional[float] = None, start_y: Optional[float] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._hold_internal(selector=selector, hold_ms=hold_ms, page_id=page_id, start_x=start_x, start_y=start_y))
+        return await self._invoke(lambda: self._hold_internal(selector=selector, hold_ms=hold_ms, page_id=page_id, start_x=start_x, start_y=start_y))
 
     async def press_key(self, key: str, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._press_key_internal(key, page_id))
+        return await self._invoke(lambda: self._press_key_internal(key, page_id))
 
     async def wait_for(self, selector: Optional[str] = None, state: str = "visible", timeout_ms: int = 10000, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._wait_for_internal(selector, state, timeout_ms, page_id))
+        return await self._invoke(lambda: self._wait_for_internal(selector, state, timeout_ms, page_id))
 
     async def take_screenshot(self, selector: Optional[str] = None, full_page: bool = False, path: Optional[str] = None, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._take_screenshot_internal(selector, full_page, path, page_id))
+        return await self._invoke(lambda: self._take_screenshot_internal(selector, full_page, path, page_id))
 
     async def list_pages(self) -> List[Dict[str, Any]]:
-        return await self._run_in_worker(self._list_pages_internal())
+        return await self._invoke(lambda: self._list_pages_internal())
 
     async def select_page(self, page_id: int) -> Dict[str, Any]:
-        return await self._run_in_worker(self._select_page_internal(page_id))
+        return await self._invoke(lambda: self._select_page_internal(page_id))
 
     async def new_page(self, url: str = "about:blank") -> Dict[str, Any]:
-        return await self._run_in_worker(self._new_page_internal(url))
+        return await self._invoke(lambda: self._new_page_internal(url))
 
     async def close_page(self, page_id: Optional[int] = None) -> Dict[str, Any]:
-        return await self._run_in_worker(self._close_page_internal(page_id))
+        return await self._invoke(lambda: self._close_page_internal(page_id))
 
     async def close(self) -> None:
         return await self._run_in_worker(self._close_internal())
@@ -1773,8 +2041,8 @@ class BrowserDevToolsManager:
         max_body_chars: int = MAX_BODY_CHARS_DEFAULT,
         page_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        return await self._run_in_worker(
-            self._get_network_details_deep_internal(
+        return await self._invoke(
+            lambda: self._get_network_details_deep_internal(
                 request_id_or_url, include_body, max_body_chars, page_id
             )
         )
@@ -1782,13 +2050,13 @@ class BrowserDevToolsManager:
     async def get_storage(
         self, types: Optional[List[str]] = None, page_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        return await self._run_in_worker(self._get_storage_internal(types, page_id))
+        return await self._invoke(lambda: self._get_storage_internal(types, page_id))
 
     async def get_matched_styles(
         self, selector: str, page_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        return await self._run_in_worker(
-            self._get_matched_styles_internal(selector, page_id)
+        return await self._invoke(
+            lambda: self._get_matched_styles_internal(selector, page_id)
         )
 
     async def get_accessibility_tree(
@@ -1797,15 +2065,15 @@ class BrowserDevToolsManager:
         page_id: Optional[int] = None,
         root_node_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        return await self._run_in_worker(
-            self._get_accessibility_tree_internal(max_depth, page_id, root_node_id)
+        return await self._invoke(
+            lambda: self._get_accessibility_tree_internal(max_depth, page_id, root_node_id)
         )
 
     async def list_page_sources(
         self, filter_text: Optional[str] = None, page_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        return await self._run_in_worker(
-            self._list_page_sources_internal(filter_text, page_id)
+        return await self._invoke(
+            lambda: self._list_page_sources_internal(filter_text, page_id)
         )
 
     async def get_source_text(
@@ -1815,6 +2083,6 @@ class BrowserDevToolsManager:
         max_chars: int = 50000,
         page_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        return await self._run_in_worker(
-            self._get_source_text_internal(source_id, kind, max_chars, page_id)
+        return await self._invoke(
+            lambda: self._get_source_text_internal(source_id, kind, max_chars, page_id)
         )

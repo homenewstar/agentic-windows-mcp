@@ -13,7 +13,7 @@ from mcp.types import ToolAnnotations
 
 from agentic_windows_mcp.infrastructure import with_analytics
 
-TOPICS = ("core", "windows", "operations")
+TOPICS = ("core", "windows", "operations", "browser")
 
 
 def server_version() -> str:
@@ -46,8 +46,10 @@ def register(mcp, *, get_desktop, get_analytics) -> None:
             "'windows' (PowerShell/encoding pitfalls, integrity levels, "
             "Chromium tree settle times, screenshot scaling), 'operations' "
             "(control-gate semantics, the takeover chord, reading the "
-            "ControlStatus health block, wedge recovery). Fetch 'core' "
-            "before your first action in a session."
+            "ControlStatus health block, wedge recovery), 'browser' (the "
+            "Browser_* attach precondition, consent-dialog handling, the "
+            "ask-before-relaunching rule, typed browser errors). Fetch "
+            "'core' before your first action in a session."
         ),
         annotations=ToolAnnotations(
             title="Guide",

@@ -84,6 +84,53 @@ _PREFIX_RULES = (
         DELIVERED_UNVERIFIED,
         "check_pending_input_via_control_status_before_retrying",
     ),
+    # Browser cluster (#37). The attach precondition is unmet and no
+    # input was sent; retrying only helps after a human enables remote
+    # debugging, so the retry token is "manual", not "safe".
+    (
+        "BROWSER_NOT_DEBUGGABLE:",
+        "BROWSER_NOT_DEBUGGABLE",
+        Disposition("not_delivered", "manual"),
+        None,
+    ),
+    # Chrome's remote-debugging consent dialog is waiting on the user.
+    # The pre-#37 ad-hoc CONSENT_PENDING prefix is accepted as an alias.
+    (
+        "BROWSER_CONSENT_PENDING:",
+        "BROWSER_CONSENT_PENDING",
+        NOT_DELIVERED,
+        "ask_user_to_allow_remote_debugging_then_retry",
+    ),
+    (
+        "CONSENT_PENDING:",
+        "BROWSER_CONSENT_PENDING",
+        NOT_DELIVERED,
+        "ask_user_to_allow_remote_debugging_then_retry",
+    ),
+    # Interact misses (#37): the locator never appeared within the
+    # caller's timeout, or it appeared but never became actionable.
+    # The pre-check failed before any input was dispatched.
+    (
+        "ELEMENT_NOT_FOUND:",
+        "ELEMENT_NOT_FOUND",
+        NOT_DELIVERED,
+        "refresh_snapshot_then_retry_original",
+    ),
+    (
+        "ELEMENT_NOT_ACTIONABLE:",
+        "ELEMENT_NOT_ACTIONABLE",
+        NOT_DELIVERED,
+        "refresh_snapshot_then_retry_original",
+    ),
+    # The Playwright driver process died (#37) and the one automatic
+    # reset did not revive it. Whether an in-flight action landed is
+    # unknowable, so delivery stays uncertain — never retry blind.
+    (
+        "DRIVER_DEAD:",
+        "DRIVER_DEAD",
+        DELIVERY_UNCERTAIN,
+        None,
+    ),
 )
 
 
@@ -102,6 +149,11 @@ def classify_error(exc: BaseException) -> tuple[str, Disposition, str | None]:
         if message.startswith(prefix):
             return code, disposition, recovery
     if isinstance(exc, TimeoutError):
+        return "TIMEOUT", UNKNOWN, None
+    if type(exc).__name__ == "TimeoutError":
+        # Playwright's TimeoutError is not the builtin class; it means
+        # the same thing — a bounded wait expired and the outcome of
+        # any in-flight action is unknown.
         return "TIMEOUT", UNKNOWN, None
     if isinstance(exc, PermissionError):
         return "PERM_DENIED", NOT_DELIVERED, None
@@ -139,6 +191,16 @@ def _augment(exc: Exception, suffix: str) -> Exception:
         return fallback(str(exc) + suffix)
 
 
+def enveloped(exc: Exception) -> Exception:
+    """Return *exc* rebuilt with its typed envelope appended.
+
+    The shared core of with_disposition, for wrappers that must not
+    touch successful results (e.g. the Browser tools, whose payloads
+    are JSON documents a prose suffix would corrupt — #37)."""
+    code, disposition, recovery = classify_error(exc)
+    return _augment(exc, error_suffix(code, disposition, recovery))
+
+
 def with_disposition(fn=None, *, success: Disposition = DELIVERED_UNVERIFIED):
     """Wrap an action tool: append the disposition to its text result, and
     convert any raised error into the same exception type whose message
@@ -152,8 +214,7 @@ def with_disposition(fn=None, *, success: Disposition = DELIVERED_UNVERIFIED):
                 try:
                     result = await func(*args, **kwargs)
                 except Exception as exc:
-                    code, disposition, recovery = classify_error(exc)
-                    raise _augment(exc, error_suffix(code, disposition, recovery)) from exc
+                    raise enveloped(exc) from exc
                 if isinstance(result, str):
                     return result + success_suffix(success)
                 return result
@@ -165,8 +226,7 @@ def with_disposition(fn=None, *, success: Disposition = DELIVERED_UNVERIFIED):
             try:
                 result = func(*args, **kwargs)
             except Exception as exc:
-                code, disposition, recovery = classify_error(exc)
-                raise _augment(exc, error_suffix(code, disposition, recovery)) from exc
+                raise enveloped(exc) from exc
             if isinstance(result, str):
                 return result + success_suffix(success)
             return result

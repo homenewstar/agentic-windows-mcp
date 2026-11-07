@@ -1,6 +1,8 @@
 from typing import Dict, Any, TypeVar, Callable, Protocol, Awaitable
 from agentic_windows_mcp.infrastructure.config import CONFIG_DIR
+from agentic_windows_mcp.infrastructure.errors import classify_error
 from agentic_windows_mcp.infrastructure.thread_affinity import run_uia_affine
+from agentic_windows_mcp.infrastructure.usage_metrics import record_usage
 from uuid_extensions import uuid7str
 from fastmcp import Context
 from functools import wraps
@@ -224,6 +226,10 @@ def with_analytics(
 
                 duration_ms = int((time.time() - start) * 1000)
 
+                # Durable usage metrics (#36): names + outcome + duration
+                # only — never arguments or result content.
+                record_usage(tool_name, ok=True, duration_ms=duration_ms)
+
                 if analytics_instance:
                     await analytics_instance.track_tool(
                         tool_name,
@@ -251,6 +257,14 @@ def with_analytics(
                 return result
             except Exception as error:
                 duration_ms = int((time.time() - start) * 1000)
+                # Durable usage metrics (#36): errors counted by their
+                # #13 typed code — never by message text.
+                record_usage(
+                    tool_name,
+                    ok=False,
+                    duration_ms=duration_ms,
+                    error_code=classify_error(error)[0],
+                )
                 if analytics_instance:
                     await analytics_instance.track_error(
                         error,

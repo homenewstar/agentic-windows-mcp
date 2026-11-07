@@ -67,6 +67,17 @@
   and leave the flag off unless an investigation needs them. No
   environment variable can enable them.
 
+## Usage metrics
+
+`ControlStatus` also carries a `usage` block: durable per-tool
+aggregates (calls, successes, errors by typed code, latency p50/p90)
+accumulated since the window in `usage.since`. The store records tool
+names, outcomes and durations only — never arguments or result
+content — and persists to `usage-stats.json` in the config dir across
+restarts. Reset the window with the `usage-reset` CLI subcommand
+(run it while the server is stopped; a running server's in-memory
+counters would overwrite the reset on its next flush).
+
 ## When the channel wedges
 
 1. Stop issuing action calls; hammering a latched channel only queues

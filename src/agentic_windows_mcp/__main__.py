@@ -350,6 +350,14 @@ def _build_mcp() -> FastMCP:
 
         init_trace(config=_trace_config)
 
+        # Issue #36: durable per-tool usage metrics. Loading never
+        # blocks startup — a missing/corrupt stats file starts fresh.
+        from agentic_windows_mcp.infrastructure.usage_metrics import (
+            init_usage_metrics,
+        )
+
+        init_usage_metrics()
+
         # Replay artifacts (#29): the frame source for pre/post-action
         # screenshots. Registered unconditionally — the trace module
         # only ever calls it while a writer has capture_screenshots on,
@@ -418,6 +426,12 @@ def _build_mcp() -> FastMCP:
             logger.debug("Server started, entering main loop")
             yield
         finally:
+            # Issue #36: persist the final usage-metrics window.
+            from agentic_windows_mcp.infrastructure.usage_metrics import (
+                flush_usage_metrics,
+            )
+
+            flush_usage_metrics()
             await notifier.close()
             try:
                 controller.stop()
@@ -1257,6 +1271,30 @@ def trace_export(directory: str | None) -> None:
         click.echo(
             f"warning: skipped {warnings} unreadable trace line(s)", err=True
         )
+
+
+@main.command("usage-reset")
+def usage_reset() -> None:
+    """Reset the durable per-tool usage metrics (#36).
+
+    Deletes usage-stats.json from the config dir and starts a fresh
+    window. Run it while the server is stopped: a running server holds
+    its counters in memory and will overwrite the file on its next
+    flush, resurrecting the old window.
+    """
+    from agentic_windows_mcp.infrastructure.usage_metrics import (
+        UsageMetrics,
+        default_stats_path,
+    )
+
+    path = default_stats_path()
+    UsageMetrics(path=path).reset()
+    click.echo(f"usage metrics reset: {path} removed; a fresh window starts now.")
+    click.echo(
+        "note: if the server is running, restart it — its in-memory "
+        "counters would otherwise overwrite this reset on the next flush.",
+        err=True,
+    )
 
 
 @main.command()

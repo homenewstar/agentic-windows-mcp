@@ -18,4 +18,12 @@ def register(mcp, *, get_desktop, get_analytics):
         ),
     )
     def control_status_tool() -> dict:
-        return get_controller().status()
+        result = get_controller().status()
+        # Durable per-tool usage metrics (#36): aggregate counts,
+        # error codes and latency percentiles since the stats window
+        # opened — names/outcomes/durations only, never arguments or
+        # result content. Imported lazily and fail-soft by design.
+        from agentic_windows_mcp.infrastructure.usage_metrics import usage_summary
+
+        result["usage"] = usage_summary()
+        return result

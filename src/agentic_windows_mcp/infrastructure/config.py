@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,7 +79,15 @@ class WindowsMCPConfig:
     source_path: Path | None = None
 
 
-CONFIG_DIR = Path("~/.agentic-windows-mcp").expanduser()
+# AGENTIC_WINDOWS_MCP_CONFIG_DIR redirects the whole config dir. It
+# exists so the test suite (tests/conftest.py) can run against a
+# throwaway directory and never resolve — let alone write — the
+# production ~/.agentic-windows-mcp (issue #39: a suite run on the
+# server's own machine overwrote the live usage-stats.json). Unset in
+# production.
+CONFIG_DIR = Path(
+    os.environ.get("AGENTIC_WINDOWS_MCP_CONFIG_DIR") or "~/.agentic-windows-mcp"
+).expanduser()
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 
 

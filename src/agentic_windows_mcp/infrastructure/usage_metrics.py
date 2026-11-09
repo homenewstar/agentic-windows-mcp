@@ -13,6 +13,15 @@ config dir, flushed atomically (tmp file + os.replace) every so often
 and on shutdown, loaded at startup. A missing or corrupt file never
 blocks startup — metrics start fresh and the reason is logged.
 
+Only the store created by :func:`init_usage_metrics` — the server
+lifespan's explicit initialisation, which loads the persisted file —
+may ever write to disk (issue #39). The implicit fallback store behind
+:func:`get_usage_metrics` counts in memory only: its ``flush()`` is a
+no-op and its ``reset()`` never unlinks the file. Before this rule, any
+process that exercised ``with_analytics`` (a pytest run on the server's
+own machine, a CLI invocation, a script) silently became a writer and
+its 25-record flush replaced the live metrics with a fresh store.
+
 The singleton accessors never raise into the tool path: a metrics bug
 must not be able to break a tool call.
 """
@@ -125,11 +134,25 @@ class _ToolStats:
 
 
 class UsageMetrics:
-    """Thread-safe aggregate store with atomic JSON persistence."""
+    """Thread-safe aggregate store with atomic JSON persistence.
 
-    def __init__(self, path: Optional[Path] = None, since: Optional[float] = None) -> None:
+    ``persist`` is the write permission for the backing file: only a
+    store that was deliberately created for persistence (via
+    :meth:`load`, :func:`init_usage_metrics`, or an explicit
+    constructor call — e.g. the ``usage-reset`` CLI) may flush or
+    unlink it. The implicit singleton fallback passes
+    ``persist=False`` and is memory-only (issue #39).
+    """
+
+    def __init__(
+        self,
+        path: Optional[Path] = None,
+        since: Optional[float] = None,
+        persist: bool = True,
+    ) -> None:
         self._path = Path(path) if path is not None else default_stats_path()
         self._since = float(since) if since is not None else time.time()
+        self._persist = persist
         self._tools: Dict[str, _ToolStats] = {}
         self._lock = threading.Lock()
         self._records_since_flush = 0
@@ -142,6 +165,10 @@ class UsageMetrics:
     @property
     def since(self) -> float:
         return self._since
+
+    @property
+    def persist(self) -> bool:
+        return self._persist
 
     # -- recording ------------------------------------------------------
 
@@ -175,6 +202,14 @@ class UsageMetrics:
         }
 
     def flush(self) -> None:
+        if not self._persist:
+            # Memory-only store (issue #39): flushing must never create
+            # or overwrite the persisted file. Just reset the cadence
+            # bookkeeping so record() does not retry on every call.
+            with self._lock:
+                self._records_since_flush = 0
+                self._last_flush = time.monotonic()
+            return
         try:
             with self._lock:
                 document = self._document()
@@ -214,11 +249,15 @@ class UsageMetrics:
 
     def reset(self) -> None:
         """Drop all counters and remove the persisted file (the documented
-        reset path, also exposed as the usage-reset CLI subcommand)."""
+        reset path, also exposed as the usage-reset CLI subcommand). A
+        memory-only store clears its counters but never unlinks the
+        file — it does not own it (issue #39)."""
         with self._lock:
             self._tools = {}
             self._since = time.time()
             self._records_since_flush = 0
+        if not self._persist:
+            return
         try:
             self._path.unlink(missing_ok=True)
         except Exception as exc:
@@ -253,9 +292,12 @@ _metrics: Optional[UsageMetrics] = None
 
 def init_usage_metrics(path: Optional[Path] = None) -> UsageMetrics:
     """Load (or start) the process-wide store. Called from the server
-    lifespan; safe to call again — returns the existing store."""
+    lifespan; safe to call again — returns the existing store. If an
+    uninitialised memory-only fallback was created first (something
+    recorded before the lifespan ran), it is replaced by the loaded
+    persisting store so the server always ends up owning the file."""
     global _metrics
-    if _metrics is None:
+    if _metrics is None or not _metrics.persist:
         _metrics = UsageMetrics.load(path)
     return _metrics
 
@@ -263,7 +305,10 @@ def init_usage_metrics(path: Optional[Path] = None) -> UsageMetrics:
 def get_usage_metrics() -> UsageMetrics:
     global _metrics
     if _metrics is None:
-        _metrics = UsageMetrics()
+        # Uninitialised fallback (issue #39): counts in memory only and
+        # can never write to the persisted file. Only the lifespan's
+        # init_usage_metrics() installs a persisting store.
+        _metrics = UsageMetrics(persist=False)
     return _metrics
 
 

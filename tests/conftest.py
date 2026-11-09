@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import pytest
 
@@ -7,6 +8,17 @@ import pytest
 # can crash the interpreter. Tests for the flash itself set/clear this env var
 # explicitly via monkeypatch.
 os.environ.setdefault("AGENTIC_WINDOWS_MCP_DISABLE_FLASH", "1")
+
+# Run the whole suite against a throwaway config dir (issue #39).
+# infrastructure.config reads AGENTIC_WINDOWS_MCP_CONFIG_DIR at import
+# time, so this must be set before the package imports below — and it
+# is forced, not setdefault: suite isolation must not depend on the
+# caller's shell. Without it, a suite run on the server's own machine
+# resolves the production ~/.agentic-windows-mcp, and a test process
+# once overwrote the live usage-stats.json through the metrics flush.
+os.environ["AGENTIC_WINDOWS_MCP_CONFIG_DIR"] = tempfile.mkdtemp(
+    prefix="awmcp-test-config-"
+)
 
 from agentic_windows_mcp.tree.views import BoundingBox, Center, TreeElementNode, ScrollElementNode
 from agentic_windows_mcp.desktop.views import Window, Status, DesktopState

@@ -158,3 +158,14 @@ def test_single_pixel_desktop_does_not_divide_by_zero(
         (MouseEventFlag.LeftDown | POSITIONING_FLAGS, 0, 0),
         (MouseEventFlag.LeftUp | POSITIONING_FLAGS, 0, 0),
     ]
+
+
+def test_absolute_mouse_move_emits_move_only_event(
+    events: list[tuple[int, int, int]],
+) -> None:
+    core.AbsoluteMouseMove(2000, 2124)
+
+    assert len(events) == 1
+    flags, nx, ny = events[0]
+    assert flags == POSITIONING_FLAGS, "a move step must carry no button bits"
+    assert _to_pixels(SINGLE_MONITOR, nx, ny) == (2000, 2124)

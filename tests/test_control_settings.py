@@ -153,7 +153,7 @@ def test_disabled_desktop_drag_still_injects_and_releases(monkeypatch):
     press, release, move = Mock(), Mock(), Mock()
     monkeypatch.setattr(service.uia, "PressMouse", press)
     monkeypatch.setattr(service.uia, "ReleaseMouse", release)
-    monkeypatch.setattr(service.uia, "SetCursorPos", move)
+    monkeypatch.setattr(service.uia, "AbsoluteMouseMove", move)
     desktop = service.Desktop.__new__(service.Desktop)
     try:
         desktop.drag((40, 0), from_loc=(0, 0))

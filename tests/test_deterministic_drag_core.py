@@ -74,7 +74,7 @@ def test_move_to_duration_emits_intermediate_and_final_positions(
     positions: list[tuple[int, int]] = []
 
     monkeypatch.setattr(core, "GetCursorPos", lambda: (0, 0))
-    monkeypatch.setattr(core, "SetCursorPos", lambda x, y: positions.append((x, y)))
+    monkeypatch.setattr(core, "AbsoluteMouseMove", lambda x, y: positions.append((x, y)))
     monkeypatch.setattr(core.time, "sleep", lambda seconds: None)
 
     core.MoveToDuration(30, 0, duration=0.04, waitTime=0)
@@ -90,7 +90,7 @@ def test_move_to_duration_honors_short_positive_duration(
     sleeps: list[float] = []
 
     monkeypatch.setattr(core, "GetCursorPos", lambda: (0, 0))
-    monkeypatch.setattr(core, "SetCursorPos", lambda x, y: positions.append((x, y)))
+    monkeypatch.setattr(core, "AbsoluteMouseMove", lambda x, y: positions.append((x, y)))
     monkeypatch.setattr(core.time, "sleep", sleeps.append)
 
     core.MoveToDuration(10, 0, duration=0.005, waitTime=0.03)
@@ -106,9 +106,30 @@ def test_move_to_duration_zero_duration_sets_final_position(
     positions: list[tuple[int, int]] = []
 
     monkeypatch.setattr(core, "GetCursorPos", lambda: (10, 10))
-    monkeypatch.setattr(core, "SetCursorPos", lambda x, y: positions.append((x, y)))
+    monkeypatch.setattr(core, "AbsoluteMouseMove", lambda x, y: positions.append((x, y)))
     monkeypatch.setattr(core.time, "sleep", lambda seconds: None)
 
     core.MoveToDuration(10, 10, duration=0, waitTime=0)
 
     assert positions == [(10, 10)]
+
+
+def test_move_to_duration_never_moves_via_setcursorpos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for #38: duration moves feed DragDrop, so they carry the
+    same delivery requirement as desktop drag steps."""
+    positions: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(core, "GetCursorPos", lambda: (0, 0))
+    monkeypatch.setattr(
+        core,
+        "SetCursorPos",
+        lambda x, y: pytest.fail("moves must not use SetCursorPos (#38)"),
+    )
+    monkeypatch.setattr(core, "AbsoluteMouseMove", lambda x, y: positions.append((x, y)))
+    monkeypatch.setattr(core.time, "sleep", lambda seconds: None)
+
+    core.MoveToDuration(30, 0, duration=0.04, waitTime=0)
+
+    assert positions[-1] == (30, 0)

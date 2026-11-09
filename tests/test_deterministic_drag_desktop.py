@@ -31,7 +31,7 @@ def test_desktop_drag_uses_explicit_start_and_duration(
     monkeypatch.setattr(
         service.uia, "PressMouse", lambda x, y, **kw: calls.append(("down", (x, y)))
     )
-    monkeypatch.setattr(service.uia, "SetCursorPos", lambda x, y: calls.append(("move", (x, y))))
+    monkeypatch.setattr(service.uia, "AbsoluteMouseMove", lambda x, y: calls.append(("move", (x, y))))
     monkeypatch.setattr(service.uia, "ReleaseMouse", lambda **kw: calls.append(("up", ())))
 
     result = desktop.drag(
@@ -58,7 +58,7 @@ def test_desktop_drag_legacy_start_uses_current_cursor(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         service.uia, "PressMouse", lambda x, y, **kw: calls.append(("down", (x, y)))
     )
-    monkeypatch.setattr(service.uia, "SetCursorPos", lambda x, y: calls.append(("move", (x, y))))
+    monkeypatch.setattr(service.uia, "AbsoluteMouseMove", lambda x, y: calls.append(("move", (x, y))))
     monkeypatch.setattr(service.uia, "ReleaseMouse", lambda **kw: calls.append(("up", ())))
 
     result = desktop.drag((30, 40))
@@ -134,3 +134,32 @@ def test_desktop_drag_rejects_invalid_points_before_waiting_or_input(
 
     with pytest.raises(ValueError, match=argument):
         desktop.drag(**kwargs)
+
+
+def test_desktop_drag_steps_are_injected_moves_not_cursor_sets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for #38: SetCursorPos only repositions the cursor, so a
+    drag built on it delivers press/release but no movement input and the
+    target never engages. Steps must be injected absolute move events."""
+    calls: list[tuple[int, int]] = []
+    desktop = _desktop()
+
+    _stub_control(monkeypatch)
+    monkeypatch.setattr(service, "sleep", lambda seconds: None)
+    monkeypatch.setattr(service.uia, "PressMouse", lambda x, y, **kw: None)
+    monkeypatch.setattr(
+        service.uia,
+        "SetCursorPos",
+        lambda x, y: pytest.fail("drag steps must not use SetCursorPos (#38)"),
+    )
+    monkeypatch.setattr(
+        service.uia, "AbsoluteMouseMove", lambda x, y: calls.append((x, y))
+    )
+    monkeypatch.setattr(service.uia, "ReleaseMouse", lambda **kw: None)
+
+    desktop.drag([50, 0], from_loc=[0, 0], duration="0.05")
+
+    assert calls, "drag emitted no move steps"
+    assert calls[-1] == (50, 0)
+    assert all(next_x >= prev_x for (prev_x, _), (next_x, _) in zip(calls, calls[1:]))

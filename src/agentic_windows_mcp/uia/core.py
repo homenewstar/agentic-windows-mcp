@@ -287,6 +287,20 @@ def AbsoluteMouseEvent(buttonFlag: int, x: int, y: int) -> None:
     )
 
 
+def AbsoluteMouseMove(x: int, y: int) -> None:
+    """
+    Emit an injected mouse-move event at the absolute screen point x, y.
+
+    Unlike SetCursorPos, which only repositions the cursor, this delivers a
+    real MOUSEEVENTF_MOVE through the input stream, so a target that is
+    tracking a button-held drag (a window move loop, an Electron sash, a
+    text selection) actually receives the movement. Drag steps must go
+    through here (#38): with SetCursorPos the press and release arrive but
+    no drag ever engages.
+    """
+    AbsoluteMouseEvent(0, x, y)
+
+
 def keybd_event(bVk: int, bScan: int, dwFlags: int, dwExtraInfo: int) -> None:
     """keybd_event from Win32."""
     ctypes.windll.user32.keybd_event(bVk, bScan, dwFlags, dwExtraInfo)
@@ -491,10 +505,9 @@ def MoveTo(x: int, y: int, moveSpeed: float = 1, waitTime: float = OPERATION_WAI
             cx = curX + int(xStep * i)
             cy = curY + int(yStep * i)
             # upper-left(0,0), lower-right(65536,65536)
-            # mouse_event(MouseEventFlag.Move | MouseEventFlag.Absolute, cx*65536//screenWidth, cy*65536//screenHeight, 0, 0)
-            SetCursorPos(cx, cy)
+            AbsoluteMouseMove(cx, cy)
             time.sleep(interval)
-    SetCursorPos(x, y)
+    AbsoluteMouseMove(x, y)
     time.sleep(waitTime)
 
 
@@ -504,7 +517,7 @@ def MoveToDuration(x: int, y: int, duration: float, waitTime: float = OPERATION_
     """
     curX, curY = GetCursorPos()
     if duration <= 0:
-        SetCursorPos(x, y)
+        AbsoluteMouseMove(x, y)
         time.sleep(waitTime)
         return
 
@@ -514,7 +527,7 @@ def MoveToDuration(x: int, y: int, duration: float, waitTime: float = OPERATION_
         ratio = i / stepCount
         cx = curX + round((x - curX) * ratio)
         cy = curY + round((y - curY) * ratio)
-        SetCursorPos(cx, cy)
+        AbsoluteMouseMove(cx, cy)
         time.sleep(interval)
     time.sleep(waitTime)
 

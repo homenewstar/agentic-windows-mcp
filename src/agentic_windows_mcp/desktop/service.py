@@ -2261,7 +2261,7 @@ class Desktop:
             interval = 0.01 if effective_duration is None else effective_duration / steps
             for step in range(1, steps + 1):
                 owner.checkpoint_current()
-                uia.SetCursorPos(
+                uia.AbsoluteMouseMove(
                     cx + round((x - cx) * step / steps), cy + round((y - cy) * step / steps)
                 )
                 owner.record_step_current()
@@ -2296,7 +2296,7 @@ class Desktop:
         steps = max(1, min(80, max(abs(x - cx), abs(y - cy)) // 20))
         for step in range(1, steps + 1):
             owner.checkpoint_current()
-            uia.SetCursorPos(cx + (x - cx) * step // steps, cy + (y - cy) * step // steps)
+            uia.AbsoluteMouseMove(cx + (x - cx) * step // steps, cy + (y - cy) * step // steps)
             owner.record_step_current()
             sleep(0.003)
 

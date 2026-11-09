@@ -103,14 +103,15 @@ The Browser toolset connects to your already-open Chrome/Edge/Brave via **CDP (C
 ### 👨‍💻 Remote coding on your own machine
 Combine the toolsets and an agent can run the full life-cycle of a coding task right on your PC: open the IDE/project folder → read code → edit files → build & test via PowerShell → open the browser and verify with DevTools → fix → `git commit` & `git push` to GitHub. You just give orders and supervise — from your phone if you like.
 
-### 🎯 Precision & reliability for agents (v0.9.0)
-- **Strict element refs**: every Snapshot labels interactive elements (`@e…`; scrollable ones `@s…`) and stores each element's full identity evidence — role, `AutomationId`, stable name/description, plus the window handle corroborated by its process's creation-time token. `Invoke` / `SetValue` / `Toggle` re-resolve the ref against the live window by counting matches: exactly one → act; none → `STALE_REF`; several → `AMBIGUOUS_TARGET`. Never a guess — and control values and bounds never count as identity.
+### 🎯 Precision & reliability for agents
+- **Strict element refs**: every Snapshot labels interactive elements (`@e…`; scrollable ones `@s…`) and stores each element's full identity evidence — role, `AutomationId`, stable name/description, plus the window handle corroborated by its process's creation-time token. `Invoke` / `SetValue` / `Toggle` re-resolve the ref against the live window by counting matches: exactly one → act; none → `STALE_REF`; several → `AMBIGUOUS_TARGET`. Never a guess — and control values and bounds never count as identity. Scoped captures keep the same evidence: the region filter behind window-scoped and cropped snapshots carries `runtime_id` and `window_handle` through the rebuild, so a ref minted from a partial capture re-resolves exactly like a full-desktop one.
 - **Query tools**: `Find` locates elements in the current snapshot by role, name or AutomationId; `Get` reads one property of a ref; `Is` evaluates a predicate — simple questions no longer need a full re-capture.
 - **Actionability auto-wait**: before a ref action dispatches, a live battery (visible / enabled / bounding-rect stable) is polled inside a bounded budget, so a button that only enables a second later simply works; terminal failures (unsupported pattern, stale ref) still fail fast. The same battery backs `Click` by element label: the click waits for the labelled element to become ready and lands on its live position — a stale or ambiguous label fails typed instead of blind-clicking its old coordinates.
 - **Batch**: run a whole sequence in one `Batch` call — a single control-gate acquisition, per-step results, and a stop at the first failure with the remaining steps honestly reported as not run.
-- **Typed errors, safe retries**: every action result ends with a delivery disposition and every failure with a typed error code, so an agent retries only when `retry=safe` — no double-submits, no toggle-undoes-itself (see *Action results* below).
+- **Typed errors, safe retries**: every action result ends with a delivery disposition and every failure with a typed error code, so an agent retries only when `retry=safe` — no double-submits, no toggle-undoes-itself (see *Action results* below). The taxonomy covers every layer, never a raw platform error: a UIA element that dies mid-capture surfaces as `UIA_CAPTURE_FAILED` instead of a raw COM error (see *Scoped snapshots, drill-down, and honest partial captures* below), and the browser tools report `BROWSER_NOT_DEBUGGABLE` / `DRIVER_DEAD` in the same envelope (see *Browser inspection* above).
+- **Channel health with evidence**: the `health` block in `ControlStatus` doesn't just flag that something failed — `last_fault` names the fail-open site plus the measured detail behind it (the indicator probe's own stored exception, or which thread currently holds the coordinator lock), and every recovery attempt is listed under `recovery_events`, so a wedged channel is diagnosed from evidence after the fact, not guessed at.
 - **Guide, sessions, trace**: the `Guide` tool serves the bundled agent playbook stamped with the version actually running; `Session` namespaces snapshot refs per task; an opt-in JSONL trace records every call for incident analysis (details below).
-- **Usage metrics built in**: `ControlStatus` also carries a `usage` block — per-tool call and success counts, errors grouped by typed code, and p50/p90 latency — persisted across restarts in `usage-stats.json` in the config dir. Only names, outcomes and durations are ever recorded, never arguments or result content. Reset the window with `agentic-windows-mcp usage-reset` (server stopped).
+- **Usage metrics built in**: `ControlStatus` also carries a `usage` block — per-tool call and success counts, errors grouped by typed code, and p50/p90 latency — persisted across restarts in `usage-stats.json` in the config dir. Only names, outcomes and durations are ever recorded, never arguments or result content. Only the running server ever writes the file — the store behind any other in-process use (a test run, a script importing the analytics wrapper) is memory-only and cannot create or overwrite it, and the test suite runs against an isolated config dir (`AGENTIC_WINDOWS_MCP_CONFIG_DIR`), so a test run on the same machine can't clobber the operating history. Reset the window with `agentic-windows-mcp usage-reset` (server stopped).
 
 ### 🛡️ Safety & control stay yours
 - **Always-on visual indicator**: while the AI is in control, your screen shows a **glowing border** + a notice panel at the top edge + an aura around the cursor — it never controls your PC "in secret".
@@ -122,7 +123,7 @@ Combine the toolsets and an agent can run the full life-cycle of a coding task r
 - **UIPI fail-closed**: before physical input or a UIA pattern write, the server compares token integrity levels; a higher-integrity target (e.g. an app running as administrator) gets a typed `PERM_DENIED` and nothing is sent — `SendInput` reporting success is never treated as proof of delivery (see *Integrity levels (UIPI)* below).
 - **Password fields stay secret**: elements marked `IsPassword` never expose their value in snapshots, results or logs, and `SetValue` never echoes what was typed into them.
 - **Protected processes**: the kill path refuses session-critical images (`explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`) by exact name match — a lookalike like `explorer-notes.exe` stays closable (see *Protected processes* below).
-- **A channel that heals itself**: `ControlStatus` exposes a health block (watchdog liveness, recovery events, and `last_fault` — the site, exception and measured detail (e.g. the probe's own stored error, or which thread holds the coordinator lock) of the most recent fail-open). When the control channel wedges, opt-in `health_recovery` restarts its input-monitor threads in-process; if thread restarts stop clearing the latch, it escalates to a controlled process restart so the scheduler/watchdog bring up a fresh server instead of leaving a zombie holding the port.
+- **A channel that heals itself**: `ControlStatus` exposes a health block (watchdog liveness, recovery events, and `last_fault` for the most recent fail-open — its measured detail is covered under *Precision & reliability* above). When the control channel wedges, opt-in `health_recovery` restarts its input-monitor threads in-process; if thread restarts stop clearing the latch, it escalates to a controlled process restart so the scheduler/watchdog bring up a fresh server instead of leaving a zombie holding the port.
 
 ---
 
@@ -147,15 +148,15 @@ Combine the toolsets and an agent can run the full life-cycle of a coding task r
                     └──────────────┬──────────────┘
                           git push/pull
                     ┌──────────────▼──────────────┐
-   ┌─────────────┐  │   YOUR COMPUTER             │      ┌──────────────────┐
-   │  AI AGENT   │  │   ┌───────────────────────┐  │      │      USER        │
-   │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
-   │ ChatGPT ·   │MCP│   │  52 control tools     │  │ sees │ glowing border   │
-   │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
-   │ Gemini ·    │  │   │  PowerShell · files   │  │      │ · Space chord*   │
-   │ DeepSeek... │  │   │  Browser DevTools     │  │      └──────────────────┘
-   └─────────────┘  │   └───────────────────────┘  │
-   (web / app /     │   Windows 10 / 11            │
+  ┌─────────────┐   │   YOUR COMPUTER             │      ┌──────────────────┐
+  │  AI AGENT   │   │  ┌───────────────────────┐  │      │      USER        │
+  │ Muse ·      ├───┼─►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
+  │ ChatGPT ·   │MCP│  │  52 control tools     │  │ sees │ glowing border   │
+  │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
+  │ Gemini ·    │   │  │  PowerShell · files   │  │      │ · Space chord*   │
+  │ DeepSeek... │   │  │  Browser DevTools     │  │      └──────────────────┘
+  └─────────────┘   │  └───────────────────────┘  │
+  (web / app /      │   Windows 10 / 11           │
     another PC)     └─────────────────────────────┘
                      *take-back chord: Ctrl + Alt + Shift + Space
 ```

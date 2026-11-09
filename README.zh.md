@@ -133,15 +133,15 @@ Agentic Windows MCP 正是让这"三人组"中的"个人电脑"一环成为现�
                     └──────────────┬──────────────┘
                           git push/pull
                     ┌──────────────▼──────────────┐
-   ┌─────────────┐  │   YOUR COMPUTER             │      ┌──────────────────┐
-   │  AI AGENT   │  │   ┌───────────────────────┐  │      │      USER        │
-   │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
-   │ ChatGPT ·   │MCP│   │  52 control tools     │  │ sees │ glowing border   │
-   │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
-   │ Gemini ·    │  │   │  PowerShell · files   │  │      │ · Space chord*   │
-   │ DeepSeek... │  │   │  Browser DevTools     │  │      └──────────────────┘
-   └─────────────┘  │   └───────────────────────┘  │
-   (web / app /     │   Windows 10 / 11            │
+  ┌─────────────┐   │   YOUR COMPUTER             │      ┌──────────────────┐
+  │  AI AGENT   │   │  ┌───────────────────────┐  │      │      USER        │
+  │ Muse ·      ├───┼─►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
+  │ ChatGPT ·   │MCP│  │  52 control tools     │  │ sees │ glowing border   │
+  │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
+  │ Gemini ·    │   │  │  PowerShell · files   │  │      │ · Space chord*   │
+  │ DeepSeek... │   │  │  Browser DevTools     │  │      └──────────────────┘
+  └─────────────┘   │  └───────────────────────┘  │
+  (web / app /      │   Windows 10 / 11           │
     another PC)     └─────────────────────────────┘
                      *take-back chord: Ctrl + Alt + Shift + Space
 ```

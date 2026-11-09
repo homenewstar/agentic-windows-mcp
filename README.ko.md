@@ -133,15 +133,15 @@ AI 에이전트 혼자서는 *말*밖에 할 수 없습니다. PC 혼자서는 �
                     └──────────────┬──────────────┘
                           git push/pull
                     ┌──────────────▼──────────────┐
-   ┌─────────────┐  │   YOUR COMPUTER             │      ┌──────────────────┐
-   │  AI AGENT   │  │   ┌───────────────────────┐  │      │      USER        │
-   │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
-   │ ChatGPT ·   │MCP│   │  52 control tools     │  │ sees │ glowing border   │
-   │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
-   │ Gemini ·    │  │   │  PowerShell · files   │  │      │ · Space chord*   │
-   │ DeepSeek... │  │   │  Browser DevTools     │  │      └──────────────────┘
-   └─────────────┘  │   └───────────────────────┘  │
-   (web / app /     │   Windows 10 / 11            │
+  ┌─────────────┐   │   YOUR COMPUTER             │      ┌──────────────────┐
+  │  AI AGENT   │   │  ┌───────────────────────┐  │      │      USER        │
+  │ Muse ·      ├───┼─►│  AGENTIC WINDOWS MCP  │◄─┼──────┤ supervises ·     │
+  │ ChatGPT ·   │MCP│  │  52 control tools     │  │ sees │ glowing border   │
+  │ Claude ·    │◄──┼──┤  mouse · keys · apps  │  │      │ · notice panel   │
+  │ Gemini ·    │   │  │  PowerShell · files   │  │      │ · Space chord*   │
+  │ DeepSeek... │   │  │  Browser DevTools     │  │      └──────────────────┘
+  └─────────────┘   │  └───────────────────────┘  │
+  (web / app /      │   Windows 10 / 11           │
     another PC)     └─────────────────────────────┘
                      *take-back chord: Ctrl + Alt + Shift + Space
 ```

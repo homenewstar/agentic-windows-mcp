@@ -103,14 +103,15 @@ Bộ công cụ Browser kết nối vào Chrome/Edge/Brave đang mở của bạ
 ### 👨‍💻 Lập trình từ xa trên chính máy của bạn
 Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đời của một tác vụ lập trình ngay trên PC của bạn: mở IDE/thư mục dự án → đọc code → sửa file → chạy build/test bằng PowerShell → mở trình duyệt kiểm tra kết quả bằng DevTools → sửa tiếp → `git commit` & `git push` lên GitHub. Bạn chỉ cần ra lệnh và giám sát — từ điện thoại cũng được.
 
-### 🎯 Chính xác & tin cậy cho agent (v0.9.0)
-- **Ref phần tử nghiêm ngặt**: mỗi Snapshot gán nhãn cho phần tử tương tác được (`@e…`; phần tử cuộn được là `@s…`) và lưu bằng chứng định danh đầy đủ của từng phần tử — role, `AutomationId`, tên/mô tả ổn định, kèm handle cửa sổ được đối chứng bằng token thời điểm tạo tiến trình. `Invoke` / `SetValue` / `Toggle` tái định danh ref trên cửa sổ sống bằng cách đếm số phần tử khớp: đúng một → thực hiện; không có → `STALE_REF`; nhiều hơn một → `AMBIGUOUS_TARGET`. Không bao giờ đoán — và giá trị điều khiển (value) hay tọa độ (bounds) không bao giờ được tính là định danh.
+### 🎯 Chính xác & tin cậy cho agent
+- **Ref phần tử nghiêm ngặt**: mỗi Snapshot gán nhãn cho phần tử tương tác được (`@e…`; phần tử cuộn được là `@s…`) và lưu bằng chứng định danh đầy đủ của từng phần tử — role, `AutomationId`, tên/mô tả ổn định, kèm handle cửa sổ được đối chứng bằng token thời điểm tạo tiến trình. `Invoke` / `SetValue` / `Toggle` tái định danh ref trên cửa sổ sống bằng cách đếm số phần tử khớp: đúng một → thực hiện; không có → `STALE_REF`; nhiều hơn một → `AMBIGUOUS_TARGET`. Không bao giờ đoán — và giá trị điều khiển (value) hay tọa độ (bounds) không bao giờ được tính là định danh. Các capture scoped giữ nguyên bằng chứng đó: bộ lọc vùng đứng sau snapshot scoped theo cửa sổ và ảnh crop mang theo `runtime_id` và `window_handle` qua bước dựng lại, nên ref tạo từ một capture một phần vẫn tái định danh chính xác như ref từ capture toàn màn hình.
 - **Công cụ truy vấn**: `Find` tìm phần tử trong snapshot hiện tại theo role, tên hoặc AutomationId; `Get` đọc một thuộc tính của ref; `Is` kiểm tra một điều kiện — những câu hỏi đơn giản không cần chụp lại toàn bộ.
 - **Tự chờ khả thi (auto-wait)**: trước khi một thao tác theo ref được thực thi, một bộ kiểm tra trực tiếp (hiển thị / đang bật / khung bao ổn định) được thăm dò trong ngân sách thời gian giới hạn, nên nút bấm một giây sau mới bật vẫn thao tác được; lỗi "chết hẳn" (pattern không hỗ trợ, ref stale) vẫn fail ngay. Cùng bộ kiểm tra đó đứng sau `Click` theo nhãn phần tử: cú click chờ phần tử có nhãn trở nên sẵn sàng rồi bấm vào vị trí sống của nó — nhãn stale hoặc mơ hồ sẽ báo lỗi có kiểu thay vì bấm mù theo tọa độ cũ.
 - **Batch**: chạy cả một chuỗi thao tác trong một lần gọi `Batch` — chỉ một lần qua cổng kiểm soát, kết quả từng bước, dừng ở bước lỗi đầu tiên và các bước còn lại được báo trung thực là chưa chạy.
-- **Lỗi có kiểu, retry an toàn**: mọi kết quả hành động đều kết thúc bằng disposition về phân phối (delivery), mọi lỗi đều có mã lỗi có kiểu — agent chỉ retry khi `retry=safe`, tránh nộp form hai lần hay toggle tự đảo ngược.
+- **Lỗi có kiểu, retry an toàn**: mọi kết quả hành động đều kết thúc bằng disposition về phân phối (delivery), mọi lỗi đều có mã lỗi có kiểu — agent chỉ retry khi `retry=safe`, tránh nộp form hai lần hay toggle tự đảo ngược. Hệ mã lỗi bao phủ mọi tầng, không bao giờ là lỗi nền tảng thô: phần tử UIA chết giữa lúc capture nổi lên thành `UIA_CAPTURE_FAILED` thay vì lỗi COM thô, và bộ công cụ trình duyệt báo `BROWSER_NOT_DEBUGGABLE` / `DRIVER_DEAD` trong cùng một envelope (xem mục trình duyệt ở trên).
+- **Sức khỏe kênh kèm bằng chứng**: block `health` trong `ControlStatus` không chỉ báo rằng đã có lỗi — `last_fault` nêu vị trí fail-open kèm chi tiết đo được đằng sau nó (exception lưu sẵn của chính probe chỉ báo, hoặc luồng nào đang giữ khóa coordinator), và mọi lần hồi phục đều được liệt kê trong `recovery_events`, nên kênh bị wedged được chẩn đoán từ bằng chứng sau sự cố thay vì đoán mò.
 - **Guide, session, trace**: công cụ `Guide` phục vụ playbook cho agent đóng gói sẵn, đóng dấu đúng phiên bản đang chạy; `Session` tách namespace cho ref theo từng phiên; trace JSONL (opt-in) ghi lại mọi lần gọi để phân tích sự cố.
-- **Metrics sử dụng tích hợp sẵn**: `ControlStatus` còn mang block `usage` — số lần gọi và thành công theo từng công cụ, lỗi gom theo mã có kiểu, độ trễ p50/p90 — lưu bền qua các lần khởi động lại trong file `usage-stats.json` ở thư mục config. Chỉ tên, kết quả và thời lượng được ghi, không bao giờ ghi tham số hay nội dung kết quả. Làm mới cửa sổ bằng `agentic-windows-mcp usage-reset` (khi server đã dừng).
+- **Metrics sử dụng tích hợp sẵn**: `ControlStatus` còn mang block `usage` — số lần gọi và thành công theo từng công cụ, lỗi gom theo mã có kiểu, độ trễ p50/p90 — lưu bền qua các lần khởi động lại trong file `usage-stats.json` ở thư mục config. Chỉ tên, kết quả và thời lượng được ghi, không bao giờ ghi tham số hay nội dung kết quả. File chỉ do chính server đang chạy ghi — store phía sau mọi cách dùng khác trong cùng tiến trình (chạy test, script import wrapper analytics) chỉ tồn tại trong bộ nhớ và không thể tạo hay ghi đè file, và bộ test chạy với thư mục config cô lập (`AGENTIC_WINDOWS_MCP_CONFIG_DIR`), nên chạy test trên cùng một máy không thể xoá mất lịch sử vận hành. Làm mới cửa sổ bằng `agentic-windows-mcp usage-reset` (khi server đã dừng).
 
 ### 🛡️ An toàn & quyền kiểm soát thuộc về bạn
 - **Chỉ báo trực quan luôn bật**: khi AI đang điều khiển, màn hình có **viền phát sáng** + bảng báo ở cạnh trên + quầng sáng quanh con trỏ — không bao giờ điều khiển "lén".
@@ -122,7 +123,7 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
 - **UIPI fail-closed**: trước khi gửi input vật lý hoặc ghi qua pattern UIA, server so sánh mức toàn vẹn (integrity) của token; đích ở mức cao hơn (ví dụ app chạy quyền administrator) sẽ nhận lỗi có kiểu `PERM_DENIED` và không có gì được gửi đi — `SendInput` báo thành công không bao giờ được coi là bằng chứng đã phân phối.
 - **Ô mật khẩu luôn bí mật**: phần tử có `IsPassword` không bao giờ lộ giá trị trong snapshot, kết quả hay log, và `SetValue` không bao giờ echo lại nội dung đã nhập vào chúng.
 - **Tiến trình được bảo vệ**: đường kill từ chối các image critical của phiên (`explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`) theo khớp tên chính xác — app có tên na ná như `explorer-notes.exe` vẫn đóng được bình thường.
-- **Kênh tự hồi phục**: `ControlStatus` có block health (watchdog còn sống, sự kiện hồi phục, và `last_fault` — vị trí, exception và chi tiết đo được (ví dụ lỗi lưu sẵn của chính probe, hoặc luồng nào đang giữ khóa coordinator) của lần fail-open gần nhất). Khi kênh điều khiển wedged, `health_recovery` (opt-in) restart các luồng monitor ngay trong tiến trình; nếu restart luồng không còn gỡ được chốt, nó leo thang thành restart cả tiến trình có kiểm soát để scheduler/watchdog dựng một server mới, thay vì để lại zombie giữ cổng.
+- **Kênh tự hồi phục**: `ControlStatus` có block health (watchdog còn sống, sự kiện hồi phục, và `last_fault` của lần fail-open gần nhất — chi tiết đo được của nó được trình bày ở mục *Chính xác & tin cậy* phía trên). Khi kênh điều khiển wedged, `health_recovery` (opt-in) restart các luồng monitor ngay trong tiến trình; nếu restart luồng không còn gỡ được chốt, nó leo thang thành restart cả tiến trình có kiểm soát để scheduler/watchdog dựng một server mới, thay vì để lại zombie giữ cổng.
 
 ---
 
@@ -143,19 +144,19 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
 ```
                     ┌─────────────────────────────┐
                     │           GITHUB            │
-                    │  mã nguồn · đồng bộ · bản sao │
+                    │ mã nguồn · đồng bộ · bản sao│
                     └──────────────┬──────────────┘
                           git push/pull
                     ┌──────────────▼──────────────┐
-   ┌─────────────┐  │   MÁY TÍNH CỦA BẠN          │      ┌──────────────────┐
-   │  AI AGENT   │  │   ┌───────────────────────┐  │      │  NGƯỜI DÙNG      │
-   │ Muse ·     ├──┼──►│  AGENTIC WINDOWS MCP  │◄─┼──────┤  giám sát · xem  │
-   │ ChatGPT ·   │MCP│   │  52 công cụ điều khiển │  │ nhìn │  viền phát sáng  │
-   │ Claude ·    │◄──┼──┤  chuột · phím · app   │  │ thấy │  · bảng cảnh báo │
-   │ Gemini ·    │  │   │  PowerShell · file    │  │      │  · phím Space*   │
-   │ DeepSeek... │  │   │  DevTools trình duyệt│  │      └──────────────────┘
-   └─────────────┘  │   └───────────────────────┘  │
-   (web / app /     │   Windows 10 / 11          │
+  ┌─────────────┐   │   MÁY TÍNH CỦA BẠN          │      ┌──────────────────┐
+  │  AI AGENT   │   │  ┌───────────────────────┐  │      │  NGƯỜI DÙNG      │
+  │ Muse ·      ├───┼─►│  AGENTIC WINDOWS MCP  │◄─┼──────┤  giám sát · xem  │
+  │ ChatGPT ·   │MCP│  │ 52 công cụ điều khiển │  │ nhìn │  viền phát sáng  │
+  │ Claude ·    │◄──┼──┤  chuột · phím · app   │  │      │  · bảng cảnh báo │
+  │ Gemini ·    │   │  │  PowerShell · file    │  │      │  · phím Space*   │
+  │ DeepSeek... │   │  │  DevTools trình duyệt │  │      └──────────────────┘
+  └─────────────┘   │  └───────────────────────┘  │
+  (web / app /      │   Windows 10 / 11           │
     máy khác)       └─────────────────────────────┘
                      *phím tắt lấy lại quyền điều khiển:
                       Ctrl + Alt + Shift + Space

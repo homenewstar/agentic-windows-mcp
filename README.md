@@ -98,6 +98,7 @@ The Browser toolset connects to your already-open Chrome/Edge/Brave via **CDP (C
 - **Deep Network**: response bodies, request payloads, per-phase timing (DNS/TCP/TLS/TTFB), transfer sizes, redirect chains, failed requests, WebSocket frames, TLS certificate details.
 - **Application storage**: cookies (including **HttpOnly**), local/session storage, IndexedDB, Cache Storage, Service Workers.
 - **Sources**: list & read the full source of every script/stylesheet.
+- **Attach, don't launch**: the toolset attaches to a browser you already run with remote debugging. Discovery reads each profile's `DevToolsActivePort` and probes the endpoint before trusting it (a stale file falls through to the next candidate); when nothing debuggable answers, the failure is a typed `BROWSER_NOT_DEBUGGABLE` carrying the per-candidate discovery report — never a raw connection error — and a failed discovery is cached for 45 s instead of being re-paid on every call. If the Playwright driver dies mid-session it is reset once automatically; a second death surfaces as the typed `DRIVER_DEAD`. The server never relaunches your browser behind your back — attaching may instead ask for your consent click (see the Guide's `browser` topic).
 
 ### 👨‍💻 Remote coding on your own machine
 Combine the toolsets and an agent can run the full life-cycle of a coding task right on your PC: open the IDE/project folder → read code → edit files → build & test via PowerShell → open the browser and verify with DevTools → fix → `git commit` & `git push` to GitHub. You just give orders and supervise — from your phone if you like.
@@ -105,10 +106,11 @@ Combine the toolsets and an agent can run the full life-cycle of a coding task r
 ### 🎯 Precision & reliability for agents (v0.9.0)
 - **Strict element refs**: every Snapshot labels interactive elements (`@e…`; scrollable ones `@s…`) and stores each element's full identity evidence — role, `AutomationId`, stable name/description, plus the window handle corroborated by its process's creation-time token. `Invoke` / `SetValue` / `Toggle` re-resolve the ref against the live window by counting matches: exactly one → act; none → `STALE_REF`; several → `AMBIGUOUS_TARGET`. Never a guess — and control values and bounds never count as identity.
 - **Query tools**: `Find` locates elements in the current snapshot by role, name or AutomationId; `Get` reads one property of a ref; `Is` evaluates a predicate — simple questions no longer need a full re-capture.
-- **Actionability auto-wait**: before a ref action dispatches, a live battery (visible / enabled / bounding-rect stable) is polled inside a bounded budget, so a button that only enables a second later simply works; terminal failures (unsupported pattern, stale ref) still fail fast.
+- **Actionability auto-wait**: before a ref action dispatches, a live battery (visible / enabled / bounding-rect stable) is polled inside a bounded budget, so a button that only enables a second later simply works; terminal failures (unsupported pattern, stale ref) still fail fast. The same battery backs `Click` by element label: the click waits for the labelled element to become ready and lands on its live position — a stale or ambiguous label fails typed instead of blind-clicking its old coordinates.
 - **Batch**: run a whole sequence in one `Batch` call — a single control-gate acquisition, per-step results, and a stop at the first failure with the remaining steps honestly reported as not run.
 - **Typed errors, safe retries**: every action result ends with a delivery disposition and every failure with a typed error code, so an agent retries only when `retry=safe` — no double-submits, no toggle-undoes-itself (see *Action results* below).
 - **Guide, sessions, trace**: the `Guide` tool serves the bundled agent playbook stamped with the version actually running; `Session` namespaces snapshot refs per task; an opt-in JSONL trace records every call for incident analysis (details below).
+- **Usage metrics built in**: `ControlStatus` also carries a `usage` block — per-tool call and success counts, errors grouped by typed code, and p50/p90 latency — persisted across restarts in `usage-stats.json` in the config dir. Only names, outcomes and durations are ever recorded, never arguments or result content. Reset the window with `agentic-windows-mcp usage-reset` (server stopped).
 
 ### 🛡️ Safety & control stay yours
 - **Always-on visual indicator**: while the AI is in control, your screen shows a **glowing border** + a notice panel at the top edge + an aura around the cursor — it never controls your PC "in secret".
@@ -120,7 +122,7 @@ Combine the toolsets and an agent can run the full life-cycle of a coding task r
 - **UIPI fail-closed**: before physical input or a UIA pattern write, the server compares token integrity levels; a higher-integrity target (e.g. an app running as administrator) gets a typed `PERM_DENIED` and nothing is sent — `SendInput` reporting success is never treated as proof of delivery (see *Integrity levels (UIPI)* below).
 - **Password fields stay secret**: elements marked `IsPassword` never expose their value in snapshots, results or logs, and `SetValue` never echoes what was typed into them.
 - **Protected processes**: the kill path refuses session-critical images (`explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`) by exact name match — a lookalike like `explorer-notes.exe` stays closable (see *Protected processes* below).
-- **A channel that heals itself**: `ControlStatus` exposes a health block (watchdog liveness, recovery events, and `last_fault` — the site and exception of the most recent fail-open). When the control channel wedges, opt-in `health_recovery` restarts its input-monitor threads in-process; if thread restarts stop clearing the latch, it escalates to a controlled process restart so the scheduler/watchdog bring up a fresh server instead of leaving a zombie holding the port.
+- **A channel that heals itself**: `ControlStatus` exposes a health block (watchdog liveness, recovery events, and `last_fault` — the site, exception and measured detail (e.g. the probe's own stored error, or which thread holds the coordinator lock) of the most recent fail-open). When the control channel wedges, opt-in `health_recovery` restarts its input-monitor threads in-process; if thread restarts stop clearing the latch, it escalates to a controlled process restart so the scheduler/watchdog bring up a fresh server instead of leaving a zombie holding the port.
 
 ---
 
@@ -223,6 +225,8 @@ agentic-windows-mcp install     # create the "agentic-windows-mcp-server" Schedu
 agentic-windows-mcp uninstall   # remove the task and stop the server
 ```
 
+For a full new-PC setup, the repo ships `scripts/setup-new-pc.ps1` (v4): it **detects an already-installed Python ≥ 3.12 before downloading anything**, installs the package into a venv under `~/.agentic-windows-mcp/`, and registers the task. The task's launcher (`start-server.ps1`, generated by `install`) probes for a working interpreter at **every** start — venv first, then system Pythons — and rebuilds the venv from the first one that runs and imports the package, so a Python that later breaks or vanishes no longer takes the server down with it.
+
 ### Expose the endpoint safely
 
 Never open the port directly to the Internet. Use one of:
@@ -243,6 +247,8 @@ enabled = true
 policy = "strict"        # relaxed | balanced | strict
 idle_timeout_seconds = 10
 ```
+
+The whole config directory can be relocated with the `AGENTIC_WINDOWS_MCP_CONFIG_DIR` environment variable. The usage metrics file (`usage-stats.json`) lives in the same directory — see *Usage metrics built in* above.
 
 ---
 
@@ -322,8 +328,8 @@ DeepSeek (and other models) connect in two ways:
 |---|---|
 | **Desktop control** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
 | **Element refs & queries** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is`, `Batch` |
-| **Apps & system** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
-| **Control gate** | `ControlStatus` (who currently holds control, which policy applies), `Guide` (the bundled, version-matched agent playbook: `core` / `windows` / `operations`), `Session` (named ref namespaces) |
+| **Apps & system** | `App`, `PowerShell`, `JobStatus`, `JobOutput`, `JobStop`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
+| **Control gate** | `ControlStatus` (who currently holds control, which policy applies, channel health, and the `usage` metrics block), `Guide` (the bundled, version-matched agent playbook: `core` / `windows` / `operations` / `browser`), `Session` (named ref namespaces) |
 | **Browser (CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **Deep DevTools** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
 
@@ -332,7 +338,7 @@ DeepSeek (and other models) connect in two ways:
 `Snapshot` can narrow what it captures instead of always walking the whole desktop:
 
 - **Window scope** — `window=<handle>` or `window="<title or process name>"` captures only that window's tree and refs. A name that matches several windows returns the candidate handles rather than guessing; the refs from a scoped capture work with `Invoke`/`SetValue`/`Toggle` like any other snapshot's.
-- **Drill-down** — `root_ref='@e12'` re-observes only that element's subtree. The subtree's refs *extend* the current snapshot: elements already labelled keep their labels, new elements append, and the Snapshot ID is unchanged, so parent and drill-down refs stay valid together.
+- **Drill-down** — `root_ref='@e12'` re-observes only that element's subtree. The subtree's refs *extend* the current snapshot: elements already labelled keep their labels, new elements append, and the Snapshot ID is unchanged, so parent and drill-down refs stay valid together. If the element dies mid-capture (a virtualized row being recycled), the failure is a typed `UIA_CAPTURE_FAILED`, not a raw COM error.
 - **Completeness** — every capture reports `Capture Completeness`. When the element budget cuts the walk, the capture is `PARTIAL` and each cut node in the tree is marked `[truncated — N children, not all shown]`, so "children not shown" is never mistaken for "no children" (a cut container is kept in the tree precisely so the marker survives).
 
 Chromium/Electron wrapper containers were evaluated for explicit skipping: anonymous no-name containers already never become semantic-tree nodes and never consume the element budget (the budget counts only elements actually emitted), while the walk still descends through them to reach actionable descendants — so output size is already wrapper-free without hiding any native container, and no additional Chromium-gated skipping is applied.

@@ -310,8 +310,8 @@ DeepSeek(및 다른 모델들)는 두 가지 방법으로 연결됩니다.
 |---|---|
 | **데스크톱 제어** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
 | **요소 참조 및 쿼리** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is`, `Batch` |
-| **앱 & 시스템** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
-| **제어 게이트** | `ControlStatus` (현재 누가 제어권을 가졌는지, 어떤 정책이 적용 중인지), `Guide` (버전이 일치하는 내장 에이전트 플레이북: `core` / `windows` / `operations`), `Session` (이름 있는 참조 네임스페이스) |
+| **앱 & 시스템** | `App`, `PowerShell`, `JobStatus`, `JobOutput`, `JobStop`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
+| **제어 게이트** | `ControlStatus` (현재 누가 제어권을 가졌는지, 어떤 정책이 적용 중인지), `Guide` (버전이 일치하는 내장 에이전트 플레이북: `core` / `windows` / `operations` / `browser`), `Session` (이름 있는 참조 네임스페이스) |
 | **브라우저(CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **심층 DevTools** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
 

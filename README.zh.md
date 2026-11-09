@@ -309,9 +309,9 @@ DeepSeek(以及其他模型)有两种连接方式：
 | 分组 | 工具 |
 |---|---|
 | **桌面控制** | `Click`、`Type`、`Move`、`Scroll`、`Shortcut`、`MultiSelect`、`MultiEdit`、`Snapshot`、`Screenshot`、`Wait`、`WaitFor` |
-| **应用与系统** | `App`、`PowerShell`、`FileSystem`、`Registry`、`Process`、`Clipboard`、`Notification`、`DisplayInventory`、`Scrape` |
+| **应用与系统** | `App`、`PowerShell`、`JobStatus`、`JobOutput`、`JobStop`、`FileSystem`、`Registry`、`Process`、`Clipboard`、`Notification`、`DisplayInventory`、`Scrape` |
 | **元素引用与查询** | `Invoke`、`SetValue`、`Toggle`、`Find`、`Get`、`Is`、`Batch` |
-| **控制网关** | `ControlStatus`(当前谁在掌控、正在应用哪种策略)、`Guide`(内置的、与运行版本一致的智能体 playbook:`core` / `windows` / `operations`)、`Session`(命名的引用命名空间) |
+| **控制网关** | `ControlStatus`(当前谁在掌控、正在应用哪种策略)、`Guide`(内置的、与运行版本一致的智能体 playbook:`core` / `windows` / `operations` / `browser`)、`Session`(命名的引用命名空间) |
 | **浏览器(CDP)** | `Browser_Connect`、`Browser_Navigate`、`Browser_ManageTabs`、`Browser_GetPageSnapshot`、`Browser_QueryElements`、`Browser_Interact`、`Browser_TakeScreenshot`、`Browser_Highlight`、`Browser_EvaluateScript` |
 | **深度 DevTools** | `Browser_GetCssStyles`、`Browser_GetComputedStyle`、`Browser_GetMatchedStyles`、`Browser_GetAccessibilityTree`、`Browser_ListConsoleMessages`、`Browser_ListNetworkRequests`、`Browser_GetNetworkDetails`、`Browser_GetStorage`、`Browser_ListPageSources`、`Browser_GetSourceText` |
 

@@ -98,6 +98,7 @@ Bộ công cụ Browser kết nối vào Chrome/Edge/Brave đang mở của bạ
 - **Network chuyên sâu**: response body, request payload, timing từng pha (DNS/TCP/TLS/TTFB), kích thước truyền, redirect chain, request lỗi, frame WebSocket, chi tiết chứng chỉ TLS.
 - **Application storage**: cookies (kể cả **HttpOnly**), local/session storage, IndexedDB, Cache Storage, Service Workers.
 - **Sources**: liệt kê & đọc nguyên văn source của mọi script/stylesheet.
+- **Attach, không tự mở**: bộ công cụ gắn vào trình duyệt bạn đang chạy sẵn với remote debugging. Bước khám phá (discovery) đọc `DevToolsActivePort` của từng profile và thăm dò (probe) endpoint trước khi tin (file stale sẽ rơi sang ứng viên tiếp theo); khi không có endpoint nào trả lời, lỗi là `BROWSER_NOT_DEBUGGABLE` có kiểu kèm báo cáo discovery theo từng ứng viên — không bao giờ là lỗi kết nối thô — và discovery lỗi được cache 45 giây thay vì phải trả giá lại ở mọi lần gọi. Nếu driver Playwright chết giữa phiên, nó được reset tự động đúng một lần; chết lần hai sẽ nổi lên thành lỗi có kiểu `DRIVER_DEAD`. Server không bao giờ tự mở lại trình duyệt sau lưng bạn — thao tác attach có thể xin một cú click đồng ý từ bạn (xem topic `browser` của Guide).
 
 ### 👨‍💻 Lập trình từ xa trên chính máy của bạn
 Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đời của một tác vụ lập trình ngay trên PC của bạn: mở IDE/thư mục dự án → đọc code → sửa file → chạy build/test bằng PowerShell → mở trình duyệt kiểm tra kết quả bằng DevTools → sửa tiếp → `git commit` & `git push` lên GitHub. Bạn chỉ cần ra lệnh và giám sát — từ điện thoại cũng được.
@@ -105,10 +106,11 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
 ### 🎯 Chính xác & tin cậy cho agent (v0.9.0)
 - **Ref phần tử nghiêm ngặt**: mỗi Snapshot gán nhãn cho phần tử tương tác được (`@e…`; phần tử cuộn được là `@s…`) và lưu bằng chứng định danh đầy đủ của từng phần tử — role, `AutomationId`, tên/mô tả ổn định, kèm handle cửa sổ được đối chứng bằng token thời điểm tạo tiến trình. `Invoke` / `SetValue` / `Toggle` tái định danh ref trên cửa sổ sống bằng cách đếm số phần tử khớp: đúng một → thực hiện; không có → `STALE_REF`; nhiều hơn một → `AMBIGUOUS_TARGET`. Không bao giờ đoán — và giá trị điều khiển (value) hay tọa độ (bounds) không bao giờ được tính là định danh.
 - **Công cụ truy vấn**: `Find` tìm phần tử trong snapshot hiện tại theo role, tên hoặc AutomationId; `Get` đọc một thuộc tính của ref; `Is` kiểm tra một điều kiện — những câu hỏi đơn giản không cần chụp lại toàn bộ.
-- **Tự chờ khả thi (auto-wait)**: trước khi một thao tác theo ref được thực thi, một bộ kiểm tra trực tiếp (hiển thị / đang bật / khung bao ổn định) được thăm dò trong ngân sách thời gian giới hạn, nên nút bấm một giây sau mới bật vẫn thao tác được; lỗi "chết hẳn" (pattern không hỗ trợ, ref stale) vẫn fail ngay.
+- **Tự chờ khả thi (auto-wait)**: trước khi một thao tác theo ref được thực thi, một bộ kiểm tra trực tiếp (hiển thị / đang bật / khung bao ổn định) được thăm dò trong ngân sách thời gian giới hạn, nên nút bấm một giây sau mới bật vẫn thao tác được; lỗi "chết hẳn" (pattern không hỗ trợ, ref stale) vẫn fail ngay. Cùng bộ kiểm tra đó đứng sau `Click` theo nhãn phần tử: cú click chờ phần tử có nhãn trở nên sẵn sàng rồi bấm vào vị trí sống của nó — nhãn stale hoặc mơ hồ sẽ báo lỗi có kiểu thay vì bấm mù theo tọa độ cũ.
 - **Batch**: chạy cả một chuỗi thao tác trong một lần gọi `Batch` — chỉ một lần qua cổng kiểm soát, kết quả từng bước, dừng ở bước lỗi đầu tiên và các bước còn lại được báo trung thực là chưa chạy.
 - **Lỗi có kiểu, retry an toàn**: mọi kết quả hành động đều kết thúc bằng disposition về phân phối (delivery), mọi lỗi đều có mã lỗi có kiểu — agent chỉ retry khi `retry=safe`, tránh nộp form hai lần hay toggle tự đảo ngược.
 - **Guide, session, trace**: công cụ `Guide` phục vụ playbook cho agent đóng gói sẵn, đóng dấu đúng phiên bản đang chạy; `Session` tách namespace cho ref theo từng phiên; trace JSONL (opt-in) ghi lại mọi lần gọi để phân tích sự cố.
+- **Metrics sử dụng tích hợp sẵn**: `ControlStatus` còn mang block `usage` — số lần gọi và thành công theo từng công cụ, lỗi gom theo mã có kiểu, độ trễ p50/p90 — lưu bền qua các lần khởi động lại trong file `usage-stats.json` ở thư mục config. Chỉ tên, kết quả và thời lượng được ghi, không bao giờ ghi tham số hay nội dung kết quả. Làm mới cửa sổ bằng `agentic-windows-mcp usage-reset` (khi server đã dừng).
 
 ### 🛡️ An toàn & quyền kiểm soát thuộc về bạn
 - **Chỉ báo trực quan luôn bật**: khi AI đang điều khiển, màn hình có **viền phát sáng** + bảng báo ở cạnh trên + quầng sáng quanh con trỏ — không bao giờ điều khiển "lén".
@@ -120,7 +122,7 @@ Kết hợp các nhóm công cụ trên, Agent có thể làm trọn vòng đờ
 - **UIPI fail-closed**: trước khi gửi input vật lý hoặc ghi qua pattern UIA, server so sánh mức toàn vẹn (integrity) của token; đích ở mức cao hơn (ví dụ app chạy quyền administrator) sẽ nhận lỗi có kiểu `PERM_DENIED` và không có gì được gửi đi — `SendInput` báo thành công không bao giờ được coi là bằng chứng đã phân phối.
 - **Ô mật khẩu luôn bí mật**: phần tử có `IsPassword` không bao giờ lộ giá trị trong snapshot, kết quả hay log, và `SetValue` không bao giờ echo lại nội dung đã nhập vào chúng.
 - **Tiến trình được bảo vệ**: đường kill từ chối các image critical của phiên (`explorer.exe`, `csrss.exe`, `smss.exe`, `winlogon.exe`, `wininit.exe`, `dwm.exe`) theo khớp tên chính xác — app có tên na ná như `explorer-notes.exe` vẫn đóng được bình thường.
-- **Kênh tự hồi phục**: `ControlStatus` có block health (watchdog còn sống, sự kiện hồi phục, và `last_fault` — vị trí + exception của lần fail-open gần nhất). Khi kênh điều khiển wedged, `health_recovery` (opt-in) restart các luồng monitor ngay trong tiến trình; nếu restart luồng không còn gỡ được chốt, nó leo thang thành restart cả tiến trình có kiểm soát để scheduler/watchdog dựng một server mới, thay vì để lại zombie giữ cổng.
+- **Kênh tự hồi phục**: `ControlStatus` có block health (watchdog còn sống, sự kiện hồi phục, và `last_fault` — vị trí, exception và chi tiết đo được (ví dụ lỗi lưu sẵn của chính probe, hoặc luồng nào đang giữ khóa coordinator) của lần fail-open gần nhất). Khi kênh điều khiển wedged, `health_recovery` (opt-in) restart các luồng monitor ngay trong tiến trình; nếu restart luồng không còn gỡ được chốt, nó leo thang thành restart cả tiến trình có kiểm soát để scheduler/watchdog dựng một server mới, thay vì để lại zombie giữ cổng.
 
 ---
 
@@ -224,6 +226,8 @@ agentic-windows-mcp install   # tạo Scheduled Task "agentic-windows-mcp-server
 agentic-windows-mcp uninstall # gỡ task và dừng server
 ```
 
+Để cài trọn gói trên một PC mới, repo có sẵn `scripts/setup-new-pc.ps1` (v4): script **phát hiện Python ≥ 3.12 đã cài sẵn trước khi tải bất cứ thứ gì**, cài gói vào venv dưới `~/.agentic-windows-mcp/` và đăng ký task. Launcher của task (`start-server.ps1`, do lệnh `install` sinh ra) thăm dò interpreter khả dụng ở **mỗi lần khởi động** — venv trước, rồi tới các Python hệ thống — và dựng lại venv từ interpreter đầu tiên chạy được và import được gói, nên một Python về sau bị hỏng hay biến mất không còn kéo sập server theo nữa.
+
 ### Phơi endpoint ra ngoài an toàn
 
 Đừng mở port trực tiếp ra Internet. Hãy dùng một trong các cách:
@@ -244,6 +248,8 @@ enabled = true
 policy = "strict"        # relaxed | balanced | strict
 idle_timeout_seconds = 10
 ```
+
+Toàn bộ thư mục config có thể dời đi bằng biến môi trường `AGENTIC_WINDOWS_MCP_CONFIG_DIR`. File metrics sử dụng (`usage-stats.json`) nằm cùng thư mục này — xem mục *Metrics sử dụng tích hợp sẵn* ở trên.
 
 ---
 
@@ -323,8 +329,8 @@ DeepSeek (và các mô hình khác) kết nối được theo hai cách:
 |---|---|
 | **Điều khiển desktop** | `Click`, `Type`, `Move`, `Scroll`, `Shortcut`, `MultiSelect`, `MultiEdit`, `Snapshot`, `Screenshot`, `Wait`, `WaitFor` |
 | **Ref phần tử & truy vấn** | `Invoke`, `SetValue`, `Toggle`, `Find`, `Get`, `Is`, `Batch` |
-| **Ứng dụng & hệ thống** | `App`, `PowerShell`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
-| **Cổng kiểm soát** | `ControlStatus` (xem ai đang giữ quyền điều khiển, chính sách đang áp dụng), `Guide` (playbook cho agent đóng gói sẵn, khớp phiên bản đang chạy: `core` / `windows` / `operations`), `Session` (namespace ref theo tên) |
+| **Ứng dụng & hệ thống** | `App`, `PowerShell`, `JobStatus`, `JobOutput`, `JobStop`, `FileSystem`, `Registry`, `Process`, `Clipboard`, `Notification`, `DisplayInventory`, `Scrape` |
+| **Cổng kiểm soát** | `ControlStatus` (xem ai đang giữ quyền điều khiển, chính sách đang áp dụng, sức khỏe kênh và block metrics `usage`), `Guide` (playbook cho agent đóng gói sẵn, khớp phiên bản đang chạy: `core` / `windows` / `operations` / `browser`), `Session` (namespace ref theo tên) |
 | **Trình duyệt (CDP)** | `Browser_Connect`, `Browser_Navigate`, `Browser_ManageTabs`, `Browser_GetPageSnapshot`, `Browser_QueryElements`, `Browser_Interact`, `Browser_TakeScreenshot`, `Browser_Highlight`, `Browser_EvaluateScript` |
 | **DevTools chuyên sâu** | `Browser_GetCssStyles`, `Browser_GetComputedStyle`, `Browser_GetMatchedStyles`, `Browser_GetAccessibilityTree`, `Browser_ListConsoleMessages`, `Browser_ListNetworkRequests`, `Browser_GetNetworkDetails`, `Browser_GetStorage`, `Browser_ListPageSources`, `Browser_GetSourceText` |
 

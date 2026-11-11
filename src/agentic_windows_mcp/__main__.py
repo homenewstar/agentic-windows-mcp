@@ -413,6 +413,7 @@ def _build_mcp() -> FastMCP:
                 controller.set_health_probe(
                     control_overlay.is_healthy,
                     detail=control_overlay.health_detail,
+                    indicator=control_overlay.indicator_status,
                 )
             controller.start()
             # The browser consent-dialog monitor hands input back to the

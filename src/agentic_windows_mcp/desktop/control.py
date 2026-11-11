@@ -79,6 +79,7 @@ class ControlCoordinator:
         self.input_ledger = InputLedger()
         self._health_probe: Callable[[], bool] | None = None
         self._health_detail: Callable[[], str | None] | None = None
+        self._indicator_status: Callable[[], dict | None] | None = None
         self._begin_notification = threading.local()
         self._visual_armed = False
         self._visual_paused = False
@@ -152,6 +153,7 @@ class ControlCoordinator:
         self,
         probe: Callable[[], bool],
         detail: Callable[[], str | None] | None = None,
+        indicator: Callable[[], dict | None] | None = None,
     ) -> None:
         """Require the visual indicator to stay alive during AI control.
 
@@ -159,9 +161,16 @@ class ControlCoordinator:
         in words — including any exception the probed component stored —
         so a fail-open on the probe can record the reason, not just the
         site.
+
+        ``indicator`` (issue #40) optionally reports the component's own
+        sub-state (``{"state", "detail"}``) for the health block. It is
+        informational only: a "degraded" component still passes the
+        probe, and the sub-state must never feed the latch/escalation
+        accounting — only the probe's boolean does that.
         """
         self._health_probe = probe
         self._health_detail = detail
+        self._indicator_status = indicator
 
     def _probe_detail(self) -> str | None:
         """The health probe's own explanation, when it provides one."""
@@ -169,6 +178,15 @@ class ControlCoordinator:
             return None
         try:
             return self._health_detail()
+        except Exception:
+            return None
+
+    def _indicator_state(self) -> dict | None:
+        """The indicator sub-state for the health block (issue #40)."""
+        if self._indicator_status is None:
+            return None
+        try:
+            return self._indicator_status()
         except Exception:
             return None
 
@@ -315,6 +333,12 @@ class ControlCoordinator:
             # fired in this process. Pairs with "emergency": emergency
             # says the channel is latched, last_fault says why.
             "last_fault": dict(self._last_fault) if self._last_fault else None,
+            # Issue #40: the indicator's own sub-state. "degraded"
+            # (border + banner visible, cursor ring unplaced) is
+            # surfaced for diagnosis but never feeds "wedged" or the
+            # recovery ladder — the health probe stays True for it, so
+            # a cosmetic sub-part cannot latch the channel again.
+            "indicator": self._indicator_state(),
         }
 
     def set_recovery_handler(self, handler: Callable[[], str] | None) -> None:

@@ -52,6 +52,30 @@ _user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
 _user32.IsWindowVisible.argtypes = [wintypes.HWND]
 _user32.IsWindowVisible.restype = wintypes.BOOL
 
+# Issue #40: the cursor probe runs on a dedicated handle loaded with
+# use_last_error=True, so a failed GetCursorPos can capture the Win32
+# error code in the calling thread, immediately (the pattern
+# control_win32 established). The shared windll handle above cannot do
+# that. A separate WinDLL instance has its own function objects, and
+# wintypes.POINT keeps the ABI identical to every other caller, so this
+# does not disturb the process-global declarations above.
+_user32_probe = ctypes.WinDLL("user32", use_last_error=True)
+_user32_probe.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+_user32_probe.GetCursorPos.restype = wintypes.BOOL
+_user32_probe.GetThreadDesktop.argtypes = [wintypes.DWORD]
+_user32_probe.GetThreadDesktop.restype = wintypes.HANDLE
+_user32_probe.GetUserObjectInformationW.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_int,
+    wintypes.LPVOID,
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD),
+]
+_user32_probe.GetUserObjectInformationW.restype = wintypes.BOOL
+_kernel32_probe = ctypes.WinDLL("kernel32", use_last_error=True)
+_kernel32_probe.GetCurrentThreadId.argtypes = []
+_kernel32_probe.GetCurrentThreadId.restype = wintypes.DWORD
+
 
 class _Layer:
     def __init__(
@@ -141,9 +165,78 @@ def _monitor_rects() -> tuple[tuple[int, int, int, int], ...]:
     return tuple((r.left, r.top, r.right, r.bottom) for r in uia.GetMonitorsRect())
 
 
+def _thread_desktop_name() -> str | None:
+    """The desktop THIS thread is bound to (issue #40 diagnostics).
+
+    A thread's desktop is fixed when it first touches user32; a
+    session/display re-creation can strand the display thread on a
+    stale desktop object while fresh name-based checks still resolve
+    "Default". Best effort only — any failure returns None; diagnostics
+    must never break the indicator they describe.
+    """
+    try:
+        desktop = _user32_probe.GetThreadDesktop(
+            _kernel32_probe.GetCurrentThreadId()
+        )
+        if not desktop:
+            return None
+        name = ctypes.create_unicode_buffer(64)
+        needed = wintypes.DWORD()
+        if not _user32_probe.GetUserObjectInformationW(
+            desktop, 2, name, ctypes.sizeof(name), ctypes.byref(needed)
+        ):
+            return None
+        return name.value or None
+    except Exception:
+        return None
+
+
+def _locate_cursor() -> tuple[wintypes.POINT | None, str | None]:
+    """Locate the pointer for the halo ring (issue #40).
+
+    Returns (point, None) on success. On failure returns (None, detail)
+    instead of raising: the ring is one cosmetic layer, and its absence
+    must degrade the indicator, never kill it — the pre-#40 raise took
+    the display thread (and, through the health probe, the whole
+    control channel) down for ~14 minutes on 10/11/2026. The detail
+    carries the Win32 error code and this thread's own desktop name so
+    the next episode is diagnosable from the log alone; the old raise
+    discarded both, which is why that incident's cause is unidentified.
+    """
+    point = wintypes.POINT()
+    if _user32_probe.GetCursorPos(ctypes.byref(point)):
+        return point, None
+    code = ctypes.get_last_error()
+    detail = (
+        "cursor not locatable for AI control indicator "
+        f"(GetCursorPos failed, win32 error {code}"
+    )
+    desktop = _thread_desktop_name()
+    if desktop:
+        detail += f", thread desktop {desktop!r}"
+    return None, detail + ")"
+
+
+def _place_ring(color: tuple[int, int, int]) -> tuple[_Layer | None, str | None]:
+    """Create the cursor halo ring, or (None, detail) when the cursor
+    cannot be located right now (issue #40)."""
+    point, detail = _locate_cursor()
+    if point is None:
+        return None, detail
+    ring = _Layer(
+        point.x - _CURSOR_SIZE // 2,
+        point.y - _CURSOR_SIZE // 2,
+        _CURSOR_SIZE,
+        _CURSOR_SIZE,
+        _cursor_bitmap(color),
+        "cursor",
+    )
+    return ring, None
+
+
 def _build_layers(
     rects: tuple[tuple[int, int, int, int], ...], pending: bool
-) -> tuple[list[_Layer], _Layer]:
+) -> tuple[list[_Layer], _Layer | None, str | None]:
     if not rects:
         raise RuntimeError("no display available for AI control indicator")
     color = _AMBER if pending else _BLUE
@@ -199,18 +292,13 @@ def _build_layers(
                         breathes=False,
                     )
                 )
-        point = wintypes.POINT()
-        if not _user32.GetCursorPos(ctypes.byref(point)):
-            raise RuntimeError("cannot locate cursor for AI control indicator")
-        ring = _Layer(
-            point.x - _CURSOR_SIZE // 2,
-            point.y - _CURSOR_SIZE // 2,
-            _CURSOR_SIZE,
-            _CURSOR_SIZE,
-            _cursor_bitmap(color),
-            "cursor",
-        )
-        return layers, ring
+        # Issue #40: an unlocatable cursor degrades the build — the
+        # border + banner layers still satisfy the inform-the-user
+        # purpose, the ring is deferred, and the caller retries its
+        # placement on later passes (the detail says why, with the
+        # Win32 error code). Every other build failure still raises.
+        ring, cursor_detail = _place_ring(color)
+        return layers, ring, cursor_detail
     except BaseException:
         for layer in reversed(layers):
             layer.close()
@@ -251,6 +339,10 @@ class _Indicator:
         self.applied = 0
         self.generation = -1
         self.error: BaseException | None = None
+        # Issue #40: why the indicator is degraded (border + banner up,
+        # cursor ring unplaced), or None. Written only by the display
+        # thread via _set_degraded; never feeds self.error.
+        self.degraded: str | None = None
         self.heartbeat = 0.0
         self.started = threading.Event()
 
@@ -323,12 +415,31 @@ class _Indicator:
         if self.thread.is_alive():
             raise RuntimeError("AI control indicator did not stop")
 
+    def _set_degraded(self, detail: str | None) -> None:
+        """Record or clear the degraded sub-state (issue #40).
+
+        Called only by the display thread. A degraded indicator still
+        acknowledges every state change, so this never touches
+        self.error and never affects is_healthy() — only a dead thread
+        or a stalled heartbeat (the #35 criteria) may do that.
+        Transitions are logged once, not per loop iteration.
+        """
+        with self.condition:
+            if self.degraded == detail:
+                return
+            self.degraded = detail
+        if detail is not None:
+            logger.warning("AI control indicator degraded: %s", detail)
+        else:
+            logger.info("AI control indicator degraded state cleared")
+
     def _run(self) -> None:
         _raise_thread_priority()
         layers: list[_Layer] = []
         ring: _Layer | None = None
         rects: tuple[tuple[int, int, int, int], ...] = ()
         mode: bool | None = None
+        built = False
         visible = False
         was_active = False
         breath_started = 0.0
@@ -346,40 +457,62 @@ class _Indicator:
                     if not was_active:
                         breath_started = time.monotonic()
                     current_rects = _monitor_rects()
-                    if ring is None or current_rects != rects or mode != pending:
+                    if not built or current_rects != rects or mode != pending:
                         for layer in reversed(layers):
                             layer.close()
                         layers = []
                         if ring:
                             ring.close()
                             ring = None
-                        layers, ring = _build_layers(current_rects, pending)
+                        layers, ring, cursor_detail = _build_layers(
+                            current_rects, pending
+                        )
                         rects, mode = current_rects, pending
+                        built = True
                         visible = False
+                        self._set_degraded(cursor_detail)
+                    elif ring is None:
+                        # Issue #40: retry ring placement on its own —
+                        # the static layers are healthy and must not be
+                        # rebuilt (and thrashed) every pass while the
+                        # cursor stays unlocatable.
+                        ring, cursor_detail = _place_ring(
+                            _AMBER if pending else _BLUE
+                        )
+                        self._set_degraded(cursor_detail)
+                        if (
+                            ring is not None
+                            and visible
+                            and not suspended
+                            and not pending
+                        ):
+                            ring.show()
                     if suspended:
                         if visible:
                             for layer in layers:
                                 layer.hide()
-                            ring.hide()
+                            if ring:
+                                ring.hide()
                             visible = False
                     else:
                         opacity = _breath_opacity(time.monotonic() - breath_started)
                         for layer in layers:
                             if layer.breathes:
                                 layer.set_opacity(opacity)
-                        if not pending:
+                        if not pending and ring:
                             ring.set_opacity(opacity)
                         if not visible:
                             for layer in layers:
                                 layer.show()
-                            if not pending:
+                            if not pending and ring:
                                 ring.show()
                             visible = True
                         if not pending:
-                            point = wintypes.POINT()
-                            if _user32.GetCursorPos(ctypes.byref(point)):
-                                ring.move(point.x - _CURSOR_SIZE // 2, point.y - _CURSOR_SIZE // 2)
-                        else:
+                            if ring:
+                                point = wintypes.POINT()
+                                if _user32.GetCursorPos(ctypes.byref(point)):
+                                    ring.move(point.x - _CURSOR_SIZE // 2, point.y - _CURSOR_SIZE // 2)
+                        elif ring:
                             ring.hide()
                 elif visible:
                     for layer in layers:
@@ -533,6 +666,28 @@ def health_detail() -> str | None:
     if not 0 <= age <= _HEARTBEAT_FRESH_SECONDS:
         return f"indicator heartbeat stale ({age:.1f}s old)"
     return None
+
+
+def indicator_status() -> dict:
+    """Indicator sub-state for the ControlStatus health block (issue #40).
+
+    ``{"state": "ok" | "degraded" | "failed", "detail": str | None}``.
+    "failed" is exactly the is_healthy() failure set (stored error,
+    dead thread, stale heartbeat) with health_detail()'s explanation.
+    "degraded" means the display is up — border + banner satisfy the
+    inform-the-user purpose — but the cursor ring could not be placed;
+    it is reported for diagnosis and excluded from latch/escalation
+    accounting, because the health probe stays True while degraded.
+    """
+    failure = health_detail()
+    if failure is not None:
+        return {"state": "failed", "detail": failure}
+    with _lock:
+        indicator = _instance
+    degraded = getattr(indicator, "degraded", None) if indicator else None
+    if degraded:
+        return {"state": "degraded", "detail": degraded}
+    return {"state": "ok", "detail": None}
 
 
 @contextmanager

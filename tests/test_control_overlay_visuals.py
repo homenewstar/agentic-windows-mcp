@@ -225,11 +225,16 @@ def test_multimonitor_creates_narrow_clickthrough_layers(monkeypatch):
             pass
 
     monkeypatch.setattr(control_overlay, "_Layer", FakeLayer)
-    monkeypatch.setattr(control_overlay._user32, "GetCursorPos", lambda ptr: True)
+    monkeypatch.setattr(
+        control_overlay,
+        "_locate_cursor",
+        lambda: (control_overlay.wintypes.POINT(), None),
+    )
     rects = ((-1920, 0, 0, 1080), (0, 0, 2560, 1440))
-    layers, ring = control_overlay._build_layers(rects, pending=False)
+    layers, ring, cursor_detail = control_overlay._build_layers(rects, pending=False)
     assert len(layers) == 12
     assert ring is not None
+    assert cursor_detail is None
     border = control_overlay_art._BORDER
     assert made[0][:4] == (-1920, 0, 1920, border)
     assert made[2][:4] == (-1920, border, border, 1080 - 2 * border)
@@ -265,7 +270,11 @@ def test_notice_glow_stays_on_its_monitor_when_narrow(monkeypatch, width):
             pass
 
     monkeypatch.setattr(control_overlay, "_Layer", FakeLayer)
-    monkeypatch.setattr(control_overlay._user32, "GetCursorPos", lambda ptr: True)
+    monkeypatch.setattr(
+        control_overlay,
+        "_locate_cursor",
+        lambda: (control_overlay.wintypes.POINT(), None),
+    )
     control_overlay._build_layers(((100, 0, 100 + width, 300),), pending=False)
     glow = next(layer for layer in made if layer[4] == "0_notice_glow")
     assert 100 <= glow[0]

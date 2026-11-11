@@ -62,6 +62,30 @@ class TestHealthBlock:
         owner._thread_beat = time.monotonic() - 600.0
         assert owner.status()["health"]["wedged"] is False
 
+    def test_indicator_substate_is_surfaced_without_wedging(self):
+        # Issue #40: a degraded indicator (cursor ring unplaced) is
+        # reported in the health block for diagnosis, but the probe
+        # still passes, so it must not read as wedged or feed the
+        # recovery/escalation accounting — only the probe boolean can.
+        owner = ready_controller()
+        owner.set_health_probe(
+            lambda: True,
+            indicator=lambda: {
+                "state": "degraded",
+                "detail": "cursor not locatable (win32 error 5)",
+            },
+        )
+        health = owner.status()["health"]
+        assert health["indicator"] == {
+            "state": "degraded",
+            "detail": "cursor not locatable (win32 error 5)",
+        }
+        assert health["wedged"] is False
+
+    def test_indicator_substate_is_none_without_provider(self):
+        owner = ready_controller()
+        assert owner.status()["health"]["indicator"] is None
+
 
 class TestRecovery:
     def _wedged(self, owner):

@@ -415,9 +415,10 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         def _fail_open(self, site="unknown", error=None):
             self.fail_count += 1
 
-        def set_health_probe(self, probe, detail=None):
+        def set_health_probe(self, probe, detail=None, indicator=None):
             self.health_probe = probe
             self.health_detail = detail
+            self.indicator_status = indicator
 
         def visible_ack_required(self):
             return self.sync_visible

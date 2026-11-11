@@ -130,6 +130,8 @@ def test_disabled_start_status_and_cleanup(monkeypatch):
             "emergency": False,
             "pending_holds": ["key"],
             "last_fault": None,
+            # Issue #40: no indicator provider is wired in this setup.
+            "indicator": None,
         },
     }
     assert owner.input_ledger.pending() == ("key",)

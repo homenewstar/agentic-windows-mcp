@@ -339,6 +339,15 @@ class _Indicator:
         self.applied = 0
         self.generation = -1
         self.error: BaseException | None = None
+        # Issue #41: who manufactured self.error — "ack_timeout" when
+        # change()'s acknowledgement wait expired, "thread" when the
+        # display thread's own loop caught the exception. The two have
+        # opposite recovery meanings (a live, beating thread that
+        # missed one ack vs a thread that died on an exception), but
+        # pre-#41 both were one undifferentiated sticky error, so the
+        # health surface could not tell them apart and recovery could
+        # not route between an overlay restart and process escalation.
+        self.error_origin: str | None = None
         # Issue #40: why the indicator is degraded (border + banner up,
         # cursor ring unplaced), or None. Written only by the display
         # thread via _set_degraded; never feeds self.error.
@@ -398,6 +407,12 @@ class _Indicator:
                 # Make the failure sticky so health checks can never grant a
                 # new AI lease with an invisible indicator.
                 self.error = RuntimeError("AI control indicator did not acknowledge state change")
+                # Issue #41: record the origin at the source. This
+                # error was manufactured by the caller's timeout, not
+                # caught by the display thread — if the thread is alive
+                # with an advancing heartbeat at recovery time, the
+                # episode is Class A and an overlay restart clears it.
+                self.error_origin = "ack_timeout"
                 self.condition.notify_all()
                 raise self.error
             if self.stopping:
@@ -534,6 +549,10 @@ class _Indicator:
             logger.exception("AI control indicator failed")
             with self.condition:
                 self.error = exc
+                # Issue #41: the display thread itself caught this —
+                # Class B at recovery time, unlike an ack timeout the
+                # caller manufactured while the thread kept beating.
+                self.error_origin = "thread"
                 self.condition.notify_all()
         finally:
             self.started.set()
@@ -597,6 +616,28 @@ def stop() -> None:
                     _instance = None
 
 
+def restart() -> None:
+    """Stop-then-start with confirmed teardown (issue #41).
+
+    The recovery path for an indicator-class fault: the fault's whole
+    state (sticky error, display thread, HWNDs) lives in this module,
+    so only recreating the owner can clear it — restarting the
+    coordinator's monitor threads cannot, which is how the 15/11/2026
+    episode burned six recoveries over ~2 hours. stop() either proves
+    the old owner exited (its windows destroyed by their owning thread,
+    _instance cleared) or raises with the owner retained; start() is
+    reached only on the proven-teardown branch, so a second owner is
+    never stacked over a live one. A thread wedged inside a native call
+    never observes `stopping`, stop() raises, and the caller records a
+    failed recovery attempt toward process escalation — the only honest
+    remedy for that sub-case. Callers must be in the latched recovery
+    context (no lease live): stop()/start() take the capture lock,
+    which a live capture may hold across an unbounded backend call.
+    """
+    stop()
+    start()
+
+
 def set_active(active: bool, *, generation: int | None = None) -> bool:
     """Display or hide AI indication; activation failure raises."""
 
@@ -640,6 +681,87 @@ def is_healthy() -> bool:
     )
 
 
+def _signature(indicator) -> dict:
+    """The indicator's classifying signals, read without collapsing
+    them (issue #41).
+
+    Every field is getattr-guarded: health reporting must work against
+    any object carrying the _Indicator surface, including the partial
+    fakes the test suite installs. ``fault_class`` is the recovery-time
+    classification from the #41 investigation: "A" — an ack timeout
+    (error manufactured by change()) on a thread that is alive with a
+    fresh heartbeat, recoverable by an overlay restart; "B" — every
+    other failure (thread-caught error, dead thread, stalled
+    heartbeat), fatal as before; None — no failure. Class C is not a
+    signature: it is what a failed overlay teardown proves at recovery
+    time, so it never appears here.
+    """
+    error = getattr(indicator, "error", None)
+    origin = getattr(indicator, "error_origin", None)
+    thread = getattr(indicator, "thread", None)
+    alive = bool(thread is not None and thread.is_alive())
+    stopping = bool(getattr(indicator, "stopping", False))
+    heartbeat = getattr(indicator, "heartbeat", 0.0) or 0.0
+    age = time.monotonic() - heartbeat
+    fresh = 0 <= age <= _HEARTBEAT_FRESH_SECONDS
+    failed = error is not None or not alive or stopping or not fresh
+    fault_class = None
+    if failed:
+        fault_class = (
+            "A" if origin == "ack_timeout" and alive and fresh else "B"
+        )
+    return {
+        "error": error,
+        "error_origin": origin,
+        "thread_alive": alive,
+        "stopping": stopping,
+        "heartbeat_age": age,
+        "heartbeat_fresh": fresh,
+        "applied": getattr(indicator, "applied", None),
+        "version": getattr(indicator, "version", None),
+        "degraded": getattr(indicator, "degraded", None),
+        "failed": failed,
+        "fault_class": fault_class,
+    }
+
+
+def _detail_from_signature(sig: dict) -> str | None:
+    """health_detail()'s string, composed from a _signature().
+
+    Pre-#41 this checked the stored error first and returned, so once
+    an ack timeout had poisoned the instance the detail named that one
+    error forever — a thread that had stalled once and recovered fully
+    was indistinguishable from a dead one, and the 15/11/2026 episode
+    recorded zero heartbeat-stale reasons in two hours of latching.
+    The primary segment keeps its historical wording (the exact string
+    the incident logs carry); for a stored error a second segment now
+    appends the classifying context — origin, thread liveness,
+    heartbeat age, applied vs version — instead of masking it.
+    """
+    if not sig["failed"]:
+        return None
+    error = sig["error"]
+    if error is not None:
+        primary = f"indicator error: {type(error).__name__}: {error}"
+        origin_text = (
+            "ack timeout"
+            if sig["error_origin"] == "ack_timeout"
+            else "display thread"
+        )
+        context = (
+            f"origin: {origin_text}; "
+            f"thread {'alive' if sig['thread_alive'] else 'not alive'}; "
+            f"heartbeat {sig['heartbeat_age']:.1f}s old; "
+            f"applied {sig['applied']} of version {sig['version']}"
+        )
+        return f"{primary}; {context}"
+    if not sig["thread_alive"]:
+        return "indicator thread not alive"
+    if sig["stopping"]:
+        return "indicator stopping"
+    return f"indicator heartbeat stale ({sig['heartbeat_age']:.1f}s old)"
+
+
 def health_detail() -> str | None:
     """Why is_healthy() is False, or None when healthy (issue #26).
 
@@ -648,46 +770,65 @@ def health_detail() -> str | None:
     invisible to the coordinator, so a latch tripped by this probe
     recorded ``error: null``. This companion names the exact failing
     condition — and the stored exception — for health.last_fault.
+    Issue #41: the string is composed from _signature(), so a stored
+    error no longer masks thread liveness or heartbeat age.
     """
     with _lock:
         indicator = _instance
     if indicator is None:
         return "indicator not started"
-    if indicator.error is not None:
-        return (
-            f"indicator error: {type(indicator.error).__name__}: "
-            f"{indicator.error}"
-        )
-    if not indicator.thread.is_alive():
-        return "indicator thread not alive"
-    if indicator.stopping:
-        return "indicator stopping"
-    age = time.monotonic() - indicator.heartbeat
-    if not 0 <= age <= _HEARTBEAT_FRESH_SECONDS:
-        return f"indicator heartbeat stale ({age:.1f}s old)"
-    return None
+    return _detail_from_signature(_signature(indicator))
 
 
 def indicator_status() -> dict:
     """Indicator sub-state for the ControlStatus health block (issue #40).
 
-    ``{"state": "ok" | "degraded" | "failed", "detail": str | None}``.
+    ``state`` is "ok" | "degraded" | "failed" with a human ``detail``.
     "failed" is exactly the is_healthy() failure set (stored error,
     dead thread, stale heartbeat) with health_detail()'s explanation.
     "degraded" means the display is up — border + banner satisfy the
     inform-the-user purpose — but the cursor ring could not be placed;
     it is reported for diagnosis and excluded from latch/escalation
     accounting, because the health probe stays True while degraded.
+
+    Issue #41 adds the classifying signature alongside: ``error_origin``
+    ("ack_timeout" | "thread" | None), ``thread_alive``,
+    ``heartbeat_age_seconds``, ``applied`` vs ``version``, and
+    ``fault_class`` ("A" | "B" | None) — enough for ControlStatus alone
+    to place an episode, which the 15/11/2026 incident proved the old
+    {state, detail} pair could not do.
     """
-    failure = health_detail()
-    if failure is not None:
-        return {"state": "failed", "detail": failure}
     with _lock:
         indicator = _instance
-    degraded = getattr(indicator, "degraded", None) if indicator else None
-    if degraded:
-        return {"state": "degraded", "detail": degraded}
-    return {"state": "ok", "detail": None}
+    if indicator is None:
+        return {
+            "state": "failed",
+            "detail": "indicator not started",
+            "error_origin": None,
+            "thread_alive": False,
+            "heartbeat_age_seconds": None,
+            "applied": None,
+            "version": None,
+            "fault_class": "B",
+        }
+    sig = _signature(indicator)
+    status = {
+        "error_origin": sig["error_origin"] if sig["failed"] else None,
+        "thread_alive": sig["thread_alive"],
+        "heartbeat_age_seconds": round(sig["heartbeat_age"], 1),
+        "applied": sig["applied"],
+        "version": sig["version"],
+        "fault_class": sig["fault_class"],
+    }
+    if sig["failed"]:
+        return {
+            "state": "failed",
+            "detail": _detail_from_signature(sig),
+            **status,
+        }
+    if sig["degraded"]:
+        return {"state": "degraded", "detail": sig["degraded"], **status}
+    return {"state": "ok", "detail": None, **status}
 
 
 @contextmanager

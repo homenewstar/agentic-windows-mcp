@@ -118,6 +118,15 @@ class ControlCoordinator:
         self._failed_recovery_at: list[float] = []
         self._latch_recovery_at: list[float] = []
         self._escalation_handler: Callable[[str], None] | None = None
+        # Issue #41: the recovery driver — a thread that evaluates
+        # _maybe_recover on a cadence while the coordinator runs, so
+        # the ladder no longer depends on someone polling ControlStatus
+        # (see recovery_tick). Spawned by start() only when recovery is
+        # armed; the stop event is captured per generation so a driver
+        # whose own recovery handler restarts the coordinator exits on
+        # its captured event while start() installs the next one.
+        self._recovery_driver: threading.Thread | None = None
+        self._recovery_driver_stop: threading.Event | None = None
         # Reason of an earned escalation deferred until calls drain.
         self._escalation_pending_reason: str | None = None
         # When the coordinator entered "unavailable" (monotonic), or None
@@ -421,6 +430,41 @@ class ControlCoordinator:
         except Exception:
             logger.exception("Escalation handler failed")
         return True
+
+    def recovery_tick(self) -> bool:
+        """One recovery/escalation evaluation with no status poll (#41).
+
+        status() calls _maybe_recover for observers; until #41 that
+        was the ONLY driver, so the ladder advanced only while someone
+        polled ControlStatus. On 15/11/2026 the record held 3 latch
+        recoveries inside the 900 s window and escalation was
+        arithmetically due, yet no qualifying evaluation ran for the
+        remaining life of the process — a wedged channel generates few
+        polls precisely when it needs the ladder most. The recovery
+        driver thread calls this on a cadence; tests drive it directly.
+        Returns True when an attempt or escalation was recorded.
+        """
+        if not self.enabled or self._stop.is_set():
+            return False
+        if self._emergency:
+            self._mark_unavailable()
+        with self._lock:
+            result = self._snapshot_locked(time.monotonic())
+        return self._maybe_recover(result)
+
+    def _recovery_loop(self, stop_event: threading.Event) -> None:
+        """Recovery driver cadence (issue #41): tick once a second
+        while this start() generation runs. The handler the tick may
+        invoke restarts the coordinator (stop()+start()), which sets
+        this generation's stop event — the loop then exits and the new
+        start()'s driver takes over."""
+        while not stop_event.wait(1.0):
+            if self._stop.is_set():
+                return
+            try:
+                self.recovery_tick()
+            except Exception:
+                logger.exception("Control recovery driver tick failed")
 
     def _maybe_recover(self, result: dict) -> bool:
         health = result.get("health") or {}
@@ -760,6 +804,21 @@ class ControlCoordinator:
             target=self._watch, name="agentic-windows-mcp-input-watch", daemon=True
         )
         self._watchdog.start()
+        # Issue #41: while recovery is armed, a driver thread advances
+        # the recovery/escalation ladder on its own cadence — the
+        # ladder must not depend on ControlStatus polls (see
+        # recovery_tick). Armed-ness is read here, at start() time,
+        # matching how the lifespan registers the handlers first.
+        if self.health_recovery and self._recovery_handler:
+            driver_stop = threading.Event()
+            self._recovery_driver_stop = driver_stop
+            self._recovery_driver = threading.Thread(
+                target=self._recovery_loop,
+                args=(driver_stop,),
+                name="agentic-windows-mcp-recovery",
+                daemon=True,
+            )
+            self._recovery_driver.start()
         with self._lock:
             now = time.monotonic()
             # A new server must not impose a cooldown without physical input.
@@ -782,6 +841,15 @@ class ControlCoordinator:
         self._deadline = 0.0
         self.input_ledger.block_new()
         self._release_requested.set()  # Wake the watchdog before joining it.
+        # Issue #41: retire this generation's recovery driver. The
+        # join is skipped when stop() runs ON the driver itself (the
+        # recovery handler restarts the coordinator from there); that
+        # driver sees its captured stop event set and exits by itself.
+        driver = self._recovery_driver
+        if self._recovery_driver_stop is not None:
+            self._recovery_driver_stop.set()
+        if driver is not None and driver is not threading.current_thread():
+            driver.join(timeout=1.0)
         if self._thread:
             self._thread.join(timeout=2.0)
         if self._watchdog:
@@ -805,6 +873,13 @@ class ControlCoordinator:
         self._delivered_mouse.clear()
         self._quarantine.clear()
         self._thread = self._watchdog = None
+        # Clear the driver refs only if they still name the generation
+        # this stop() retired — a handler-driven stop()+start() pair
+        # installs the next generation's driver from start(), after
+        # this stop() has fully returned.
+        if self._recovery_driver is driver:
+            self._recovery_driver = None
+            self._recovery_driver_stop = None
 
     def _fail_open(
         self,

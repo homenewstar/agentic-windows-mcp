@@ -114,7 +114,17 @@ def test_indicator_degrades_instead_of_dying_and_acks_changes(monkeypatch, fake_
     assert indicator.error is None
     assert indicator.thread.is_alive()
     status = control_overlay.indicator_status()
-    assert status == {"state": "degraded", "detail": DETAIL}
+    assert status["state"] == "degraded"
+    assert status["detail"] == DETAIL
+    # Issue #41 extended the status dict with the classifying
+    # signature (error origin, thread liveness, heartbeat age,
+    # applied/version, fault class); a degraded indicator has no
+    # failure, so the class and origin stay None. (This assertion was
+    # exact-dict equality at #40; the shape change is the #41 feature,
+    # not a behaviour change for the degraded path itself.)
+    assert status["fault_class"] is None
+    assert status["error_origin"] is None
+    assert status["thread_alive"] is True
     # Lease arm/disarm cycles during degradation complete cleanly; the
     # 10/11 failure mode was exactly this cycle re-raising a dead
     # thread's stored error into _fail_open on every arm.
@@ -147,7 +157,10 @@ def test_ring_appears_and_degraded_clears_when_cursor_returns(monkeypatch, fake_
         if control_overlay.indicator_status()["state"] == "ok":
             break
         time.sleep(0.02)
-    assert control_overlay.indicator_status() == {"state": "ok", "detail": None}
+    status = control_overlay.indicator_status()
+    assert status["state"] == "ok"
+    assert status["detail"] is None
+    assert status["fault_class"] is None  # Issue #41 signature fields.
     rings = [layer for layer in FakeLayer.made if layer.name == "cursor"]
     assert rings, "ring layer was never placed after the cursor returned"
     assert "show" in rings[-1].events

@@ -378,17 +378,46 @@ def _build_mcp() -> FastMCP:
         controller.policy = _control_config.policy
         controller.idle_timeout_seconds = _control_config.idle_timeout_seconds
         # Issue #8: wedged-channel recovery is opt-in per machine
-        # ([control] health_recovery, default off). The scoped action is a
-        # restart of this process's input monitor/watchdog threads only;
-        # attempts are rate-limited, logged, and listed by ControlStatus.
+        # ([control] health_recovery, default off). Attempts are
+        # rate-limited, logged, and listed by ControlStatus. Issue #41:
+        # the scoped action is routed to the component that owns the
+        # recorded fault (see _recover_control_channel), not always to
+        # the input monitor threads.
         controller.health_recovery = _control_config.health_recovery
         if _control_config.health_recovery:
-            def _restart_control_monitors() -> str:
+            def _recover_control_channel() -> str:
+                # Issue #41: an indicator-class fault lives entirely in
+                # the overlay — its sticky error, its display thread,
+                # its HWNDs — so restarting only the coordinator's
+                # monitor threads cannot clear it. On 15/11/2026 six
+                # mechanically "successful" recoveries did exactly that
+                # while the overlay's sticky ack error re-latched the
+                # channel for ~2 hours. Attempt the overlay
+                # stop-then-start first: control_overlay.restart()
+                # proceeds to start() only when stop() proved the old
+                # owner exited, and a teardown that cannot be confirmed
+                # raises here — so this attempt is recorded as failed
+                # and counts toward process escalation (the
+                # native-wedge signature, Class C). The overlay restart
+                # belongs only in this latched context (no lease live):
+                # overlay stop/start take the capture lock, which a
+                # live capture may hold across an unbounded backend
+                # call. The monitor restart still runs afterwards, as
+                # before, to reset the coordinator's own bookkeeping.
+                outcomes: list[str] = []
+                indicator = control_overlay.indicator_status()
+                if indicator.get("state") == "failed":
+                    control_overlay.restart()
+                    outcomes.append(
+                        "indicator overlay restarted "
+                        f"(fault class {indicator.get('fault_class') or 'B'})"
+                    )
                 controller.stop()
                 controller.start()
-                return "input monitor threads restarted"
+                outcomes.append("input monitor threads restarted")
+                return "; ".join(outcomes)
 
-            controller.set_recovery_handler(_restart_control_monitors)
+            controller.set_recovery_handler(_recover_control_channel)
 
             # Issue #25: when the recovery record proves thread restarts
             # cannot clear the fault, exit non-zero so the existing

@@ -12,6 +12,13 @@ tracked independently of its pipes. Two daemon threads drain stdout/stderr
 into capped buffers, so output stays retrievable incrementally via offsets
 even after the process exits, including output a detached grandchild writes
 into the inherited pipes afterwards.
+
+Since issue #42 the same registry also tracks *synchronous* executions
+(:class:`SyncJob`): the PowerShell tool registers each sync call before
+running it and completes the record with the executor's real output and
+exit code, so when the control gate's deadline answers the caller with
+TOOL_TIMEOUT first, the execution's outcome is still retrievable here
+instead of being discarded — and the call ledger links to the record.
 """
 
 from __future__ import annotations
@@ -122,6 +129,79 @@ class Job:
     def status(self) -> dict:
         return {
             "job_id": self.id,
+            "kind": "background",
+            "call_id": None,
+            "state": "running" if self.running else "exited",
+            "exit_code": self.exit_code,
+            "pid": self.pid,
+            "elapsed_seconds": round(self.elapsed, 2),
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.started_at)),
+            "command": self.command,
+            "stopped": self.stopped,
+            "stdout_chars": self.stdout.total,
+            "stderr_chars": self.stderr.total,
+        }
+
+
+@dataclass
+class SyncJob:
+    """A synchronous PowerShell execution tracked in this registry (#42).
+
+    The synchronous executor owns its process end-to-end (graceful
+    timeout, tree kill) and exposes no handle while it runs, so this
+    record is a *tracking* entry, not a control handle: the tool thread
+    registers the execution before it starts and completes the record
+    with the final output and exit code when the executor returns. That
+    is exactly the moment the old design lost the outcome — when the
+    control gate's deadline fired first, the caller's TOOL_TIMEOUT said
+    nothing about what the command eventually did, and the result was
+    discarded. With the record, JobStatus/JobOutput answer afterwards,
+    and the #42 call ledger links to it via ``call_id``.
+
+    ``pid`` is None: the executor does not surface the shell's PID, and
+    a record that cannot be acted on must not pretend to carry one.
+    For the same reason a running SyncJob cannot be stopped through
+    JobStop — it ends at its own tool timeout or by completing.
+    """
+
+    id: str
+    command: str
+    started_at: float  # wall clock
+    call_id: str | None = None
+    pid: None = None
+    stdout: StreamBuffer = field(default_factory=StreamBuffer)
+    stderr: StreamBuffer = field(default_factory=StreamBuffer)
+    stopped: bool = False
+    _mono: float = field(default_factory=time.monotonic, repr=False)
+    _exit_code: int | None = field(default=None, repr=False)
+    _ended_mono: float | None = field(default=None, repr=False)
+
+    @property
+    def running(self) -> bool:
+        return self._exit_code is None
+
+    @property
+    def exit_code(self) -> int | None:
+        return self._exit_code
+
+    @property
+    def elapsed(self) -> float:
+        end = self._ended_mono if self._ended_mono is not None else time.monotonic()
+        return max(0.0, end - self._mono)
+
+    def complete(self, stdout: str, stderr: str, exit_code: int) -> None:
+        if stdout:
+            self.stdout.append(stdout)
+        if stderr:
+            self.stderr.append(stderr)
+        self._ended_mono = time.monotonic()
+        self._exit_code = exit_code
+
+    def status(self) -> dict:
+        return {
+            "job_id": self.id,
+            "kind": "sync",
+            "call_id": self.call_id,
             "state": "running" if self.running else "exited",
             "exit_code": self.exit_code,
             "pid": self.pid,
@@ -161,12 +241,39 @@ def _pump(stream, buffer: StreamBuffer) -> None:
 
 
 class JobManager:
-    """Owns every background job for the lifetime of the server process."""
+    """Owns every job — background and synchronous-tracking — for the
+    lifetime of the server process."""
 
     def __init__(self) -> None:
-        self._jobs: dict[str, Job] = {}
+        self._jobs: dict[str, Job | SyncJob] = {}
         self._seq = 0
         self._lock = threading.Lock()
+
+    def register_sync(self, command: str, call_id: str | None = None) -> SyncJob:
+        """Register a synchronous execution before it starts (#42), so
+        its outcome stays lookup-able even if the caller stops waiting.
+        Shares the background jobs' id sequence and eviction."""
+        with self._lock:
+            self._seq += 1
+            job = SyncJob(
+                id=f"job-{self._seq}",
+                command=command,
+                started_at=time.time(),
+                call_id=call_id,
+            )
+            self._jobs[job.id] = job
+            self._evict_locked()
+        logger.info("Registered synchronous execution %s (call %s)", job.id, call_id)
+        return job
+
+    def complete_sync(
+        self, job_id: str, stdout: str, stderr: str, exit_code: int
+    ) -> SyncJob:
+        job = self.get(job_id)
+        if not isinstance(job, SyncJob):
+            raise ValueError(f"job {job_id} is not a synchronous execution record")
+        job.complete(stdout, stderr, exit_code)
+        return job
 
     def start(self, command: str, args: list[str], env: dict, cwd: str) -> Job:
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
@@ -205,7 +312,7 @@ class JobManager:
             oldest = min(exited, key=lambda j: j.started_at)
             del self._jobs[oldest.id]
 
-    def get(self, job_id: str) -> Job:
+    def get(self, job_id: str) -> Job | SyncJob:
         with self._lock:
             job = self._jobs.get(job_id)
         if job is None:
@@ -239,6 +346,14 @@ class JobManager:
 
     def stop(self, job_id: str) -> dict:
         job = self.get(job_id)
+        if isinstance(job, SyncJob):
+            if job.running:
+                raise ValueError(
+                    f"{job_id} is a synchronous execution record (kind=sync); "
+                    "it has no stoppable handle — it ends at its own tool "
+                    "timeout or by completing"
+                )
+            return job.status()
         if job.running:
             subprocess.run(
                 ["taskkill", "/PID", str(job.pid), "/T", "/F"],

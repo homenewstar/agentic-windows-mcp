@@ -25,6 +25,14 @@ current_steps: contextvars.ContextVar[StepCounter | None] = contextvars.ContextV
 current_request_closed: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
     "agentic_windows_mcp_control_request_closed", default=None
 )
+# The #42 call-ledger id of the gated call whose handler is running in
+# this context. Set by the control gate just before dispatch; copied
+# into worker threads like the other request context, so a tool (the
+# synchronous PowerShell path) can link its jobs-registry record to the
+# call that owns it.
+current_call_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "agentic_windows_mcp_call_id", default=None
+)
 
 
 def get_step_count() -> int:

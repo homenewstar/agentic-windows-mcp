@@ -9,15 +9,26 @@ from fastmcp import Context
 
 
 def _format_job_status(status: dict) -> str:
+    pid_line = (
+        f"PID: {status['pid']}"
+        if status["pid"] is not None
+        else "PID: n/a (synchronous execution — the executor owns the process)"
+    )
     lines = [
         f"Job: {status['job_id']}",
         f"State: {status['state']}",
-        f"PID: {status['pid']}",
+        pid_line,
         f"Elapsed: {status['elapsed_seconds']}s",
         f"Started: {status['started_at']}",
         f"Command: {status['command']}",
         f"Output buffered: stdout {status['stdout_chars']} chars, stderr {status['stderr_chars']} chars",
     ]
+    if status.get("kind") == "sync":
+        lines.insert(
+            1,
+            "Kind: sync (a synchronous PowerShell execution recorded for "
+            f"outcome lookup; owning call: {status.get('call_id')})",
+        )
     if status["exit_code"] is not None:
         lines.insert(2, f"Exit Code: {status['exit_code']}")
     if status["stopped"]:
@@ -28,7 +39,7 @@ def _format_job_status(status: dict) -> str:
 def register(mcp, *, get_desktop, get_analytics):
     @mcp.tool(
         name="PowerShell",
-        description="Shell/command execution. Keywords: shell, run, execute, cmd, terminal, command line, script. A comprehensive system tool for executing any PowerShell commands. Use it to navigate the file system, manage files and processes, and execute system-level operations. Capable of accessing web content (e.g., via Invoke-WebRequest), interacting with network resources, and performing complex administrative tasks. This tool provides full access to the underlying operating system capabilities, making it the primary interface for system automation, scripting, and deep system interaction. Under relaxed control policy this tool is not desktop-gated. Prefer background execution; coordinate with the user before commands known to interfere with their desktop, reusing existing authorization. Set background=True to start the command as a background job instead: the call returns a job id immediately (use JobStatus/JobOutput/JobStop to follow it) — the right choice for long-running commands and for starting servers, which otherwise hold the output pipes open and look like a timeout even when they succeeded.",
+        description="Shell/command execution. Keywords: shell, run, execute, cmd, terminal, command line, script. A comprehensive system tool for executing any PowerShell commands. Use it to navigate the file system, manage files and processes, and execute system-level operations. Capable of accessing web content (e.g., via Invoke-WebRequest), interacting with network resources, and performing complex administrative tasks. This tool provides full access to the underlying operating system capabilities, making it the primary interface for system automation, scripting, and deep system interaction. Under relaxed control policy this tool is not desktop-gated. Prefer background execution; coordinate with the user before commands known to interfere with their desktop, reusing existing authorization. Set background=True to start the command as a background job instead: the call returns a job id immediately (use JobStatus/JobOutput/JobStop to follow it) — the right choice for long-running commands and for starting servers, which otherwise hold the output pipes open and look like a timeout even when they succeeded. Synchronous executions are recorded in the same jobs registry (kind=sync) and linked from the call ledger: if a call answers TOOL_TIMEOUT, look its call_id up via ControlStatus and follow the record's job_id with JobStatus/JobOutput to learn what the command actually did before retrying. Pass idempotency_key (any string you choose) on a state-changing command to make retries safe: resubmitting the same key returns the original call's recorded outcome instead of executing twice.",
         annotations=ToolAnnotations(
             title="PowerShell",
             readOnlyHint=False,
@@ -43,8 +54,12 @@ def register(mcp, *, get_desktop, get_analytics):
         command: str,
         timeout: int = 30,
         background: bool | str = False,
+        idempotency_key: str | None = None,
         ctx: Context = None,
     ) -> str:
+        # idempotency_key is consumed by the control gate (it dedups the
+        # submission against the #42 call ledger before this function
+        # runs); the executor itself does not need the value.
         if background is True or (isinstance(background, str) and background.lower() == "true"):
             job = PowerShellExecutor.start_background(command)
             return (
@@ -52,16 +67,28 @@ def register(mcp, *, get_desktop, get_analytics):
                 "Use JobStatus to check completion, JobOutput to read its output, "
                 "JobStop to terminate it."
             )
+        # #42: register the synchronous execution in the jobs registry
+        # before running it, linked to the gate's call-ledger record, so
+        # its outcome stays lookup-able even when the gate deadline
+        # answers the caller first and this thread keeps running.
+        from agentic_windows_mcp.desktop.control_context import current_call_id
+        from agentic_windows_mcp.infrastructure.call_ledger import link_call_job
+
+        call_id = current_call_id.get()
+        record = JOBS.register_sync(command, call_id=call_id)
+        link_call_job(call_id, record.id)
         try:
             stdout, stderr, status_code = PowerShellExecutor.execute_command_detailed(
                 command, timeout
             )
-            result = f"Response: {stdout}\nStatus Code: {status_code}"
-            if stderr:
-                result += f"\nStderr: {stderr}"
-            return result
-        except Exception as e:
+        except Exception:
+            JOBS.complete_sync(record.id, "", "", 1)
             raise
+        JOBS.complete_sync(record.id, stdout, stderr, status_code)
+        result = f"Response: {stdout}\nStatus Code: {status_code}"
+        if stderr:
+            result += f"\nStderr: {stderr}"
+        return result
 
     @mcp.tool(
         name="JobStatus",
